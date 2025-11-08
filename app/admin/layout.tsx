@@ -2,49 +2,102 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
 import Image from "next/image";
+import { usePathname } from "next/navigation";
 
-const TOKENS = {
-  light: {
-    s4: 4,
-    s6: 6,
-    s8: 8,
-    s10: 10,
-    s12: 12,
-    s16: 16,
-    s20: 20,
-    sidebarWidth: 240,
-    line: "#e5e7eb",
-    bg: "#f9fafb",
-    panel: "#ffffff",
-    inkSoft: "#6b7280",
-    ink: "#020617",
-    em: "#10b981",
-    emSoft: "#d1fae5",
-  },
-  dark: {
-    s4: 4,
-    s6: 6,
-    s8: 8,
-    s10: 10,
-    s12: 12,
-    s16: 16,
-    s20: 20,
-    sidebarWidth: 240,
-    line: "#1f2937",
-    bg: "#020617",
-    panel: "#020617",
-    inkSoft: "#9ca3af",
-    ink: "#e5e7eb",
-    em: "#10b981",
-    emSoft: "#0b3b35",
-  },
-} as const;
+// shadcn/ui kit
+import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
+import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb";
+// --- Local theme toggle (no dependency on next-themes) ---
+function applyThemeClass(theme: "light" | "dark") {
+  try {
+    const root = document.documentElement;
+    if (theme === "dark") root.classList.add("dark");
+    else root.classList.remove("dark");
+  } catch {}
+}
 
-const navItems: { href: string; label: string }[] = [
+function getInitialTheme(): "light" | "dark" {
+  try {
+    const stored = localStorage.getItem("vf_theme");
+    if (stored === "light" || stored === "dark") return stored;
+  } catch {}
+  try {
+    return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  } catch {}
+  return "light";
+}
+
+function LocalThemeToggle() {
+  const [mounted, setMounted] = (require("react") as typeof import("react")).useState(false);
+  const [theme, setTheme] = (require("react") as typeof import("react")).useState<"light" | "dark">("light");
+  const React = require("react") as typeof import("react");
+
+  React.useEffect(() => {
+    const t = getInitialTheme();
+    setTheme(t);
+    applyThemeClass(t);
+    setMounted(true);
+  }, []);
+
+  const setAndApply = (t: "light" | "dark") => {
+    setTheme(t);
+    try { localStorage.setItem("vf_theme", t); } catch {}
+    applyThemeClass(t);
+  };
+
+  const icon = theme === "dark" ? (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+  ) : (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+  );
+
+  if (!mounted) {
+    return (
+      <Button variant="outline" size="icon" aria-label="Theme" disabled>
+        {icon}
+      </Button>
+    );
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="icon" aria-label="Theme">
+          {icon}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuLabel>Theme</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => setAndApply("light")}>Light</DropdownMenuItem>
+        <DropdownMenuItem onClick={() => setAndApply("dark")}>Dark</DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+// --- End local theme toggle ---
+
+const NAV: { href: string; label: string }[] = [
   { href: "/admin/dashboard", label: "Dashboard" },
   { href: "/admin/partner-applications", label: "Partner Applications" },
   { href: "/admin/clients", label: "Clients" },
@@ -55,66 +108,13 @@ const navItems: { href: string; label: string }[] = [
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const [theme, setTheme] = useState<"light" | "dark">("dark");
-  const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const [notifOpen, setNotifOpen] = useState(false);
-  const notifRef = useRef<HTMLDivElement | null>(null);
 
-  // Load initial theme preference from localStorage or system preferences
-  useEffect(() => {
-    try {
-      const stored = window.localStorage.getItem("bocc_admin_theme");
-      if (stored === "light" || stored === "dark") {
-        setTheme(stored);
-        return;
-      }
-      if (window.matchMedia?.("(prefers-color-scheme: light)").matches) {
-        setTheme("light");
-      }
-    } catch {
-      // ignore
-    }
-  }, []);
+  // Don't wrap the login page at /admin in the admin shell.
+  if (pathname === "/admin") return <>{children}</>;
 
-  // Persist theme choice
-  useEffect(() => {
-    try {
-      window.localStorage.setItem("bocc_admin_theme", theme);
-    } catch {
-      // ignore
-    }
-  }, [theme]);
-
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        setUserMenuOpen(false);
-        setNotifOpen(false);
-      }
-    }
-    function onClick(e: MouseEvent) {
-      const target = e.target as Node | null;
-      if (notifRef.current && target && !notifRef.current.contains(target)) {
-        setNotifOpen(false);
-      }
-    }
-    window.addEventListener("keydown", onKey);
-    document.addEventListener("click", onClick);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      document.removeEventListener("click", onClick);
-    };
-  }, []);
-
-  const T = TOKENS[theme];
-
-  // --- Derive dynamic page title & breadcrumbs from current path ---
-  const segments = pathname.split("/").filter(Boolean); // ["admin", "dashboard", ...]
-  const activeItem = navItems.find(
-    (n) => pathname === n.href || pathname.startsWith(n.href + "/")
-  );
-  const pageTitle = activeItem?.label ||
-    (segments[segments.length - 1]?.replace(/-/g, " ") || "Dashboard");
+  const segments = pathname.split("/").filter(Boolean);
+  const activeItem = NAV.find((n) => pathname === n.href || pathname.startsWith(n.href + "/"));
+  const pageTitle = activeItem?.label || (segments[segments.length - 1]?.replace(/-/g, " ") || "Dashboard");
 
   const crumbs = segments.map((seg, idx) => {
     const href = "/" + segments.slice(0, idx + 1).join("/");
@@ -122,376 +122,146 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
     return { href, label };
   });
 
-  // Important: don't wrap the login page at /admin in the admin shell.
-  if (pathname === "/admin") {
-    return <>{children}</>;
-  }
-
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        display: "flex",
-        background: T.bg,
-        color: T.ink,
-        fontFamily: '"Variforce", system-ui, -apple-system, BlinkMacSystemFont, sans-serif',
-      }}
-    >
-      {/* Sidebar */}
-      <aside
-        style={{
-          width: T.sidebarWidth,
-          borderRight: `1px solid ${T.line}`,
-          padding: T.s12,
-          display: "flex",
-          flexDirection: "column",
-          gap: T.s12,
-          background:
-            theme === "dark"
-              ? "radial-gradient(circle at top left, rgba(16,185,129,0.16), transparent 60%), #020617"
-              : "radial-gradient(circle at top left, rgba(16,185,129,0.08), transparent 60%), #f9fafb",
-        }}
-      >
-        {/* Brand / header */}
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: T.s4,
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: T.s8,
-            }}
-          >
-            <Image
-              src="/logo.png"
-              alt="BOCC logo"
-              width={32}
-              height={32}
-              style={{ borderRadius: 999, flexShrink: 0 }}
-            />
-            <div>
-              <div
-                style={{
-                  fontSize: 14,
-                  fontWeight: 800,
-                  letterSpacing: 0.8,
-                }}
-              >
-                VariForce Admin
-              </div>
-              <div
-                style={{
-                  fontSize: 11,
-                  color: T.inkSoft,
-                }}
-              >
-                Logistics &amp; partners console
-              </div>
+    <div className="min-h-dvh w-full bg-background text-foreground">
+      <div className="grid grid-cols-1 lg:grid-cols-[240px_1fr]">
+        {/* Sidebar (desktop) */}
+        <aside className="hidden lg:flex lg:min-h-dvh lg:flex-col lg:border-r lg:bg-card/40 lg:backdrop-blur">
+          <div className="flex items-center gap-3 p-4">
+            <Image src="/logo.png" alt="BOCC" width={32} height={32} className="rounded-full" />
+            <div className="leading-tight">
+              <div className="text-sm font-extrabold tracking-tight">VariForce Admin</div>
+              <div className="text-[11px] text-muted-foreground">Logistics & partners</div>
             </div>
           </div>
-
-          <div
-            style={{
-              fontSize: 11,
-              color: T.inkSoft,
-            }}
-          >
-            Internal console for partners, clients and projects.
-          </div>
-        </div>
-
-        {/* Nav */}
-        <nav
-          style={{
-            marginTop: T.s8,
-            display: "grid",
-            gap: 2,
-          }}
-        >
-          {navItems.map((item) => {
-            const active =
-              pathname === item.href || pathname.startsWith(item.href + "/");
-
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  padding: "8px 10px",
-                  borderRadius: 999,
-                  fontSize: 13,
-                  textDecoration: "none",
-                  border: active ? `1px solid ${T.em}` : "1px solid transparent",
-                  background: active ? T.emSoft : "transparent",
-                  color: active
-                    ? theme === "light"
-                      ? "#064e3b" // rich emerald for light mode
-                      : "#bbf7d0" // soft mint for dark mode
-                    : T.inkSoft,
-                }}
-              >
-                <span>{item.label}</span>
-                {active && (
-                  <span
-                    style={{
-                      width: 6,
-                      height: 6,
-                      borderRadius: 999,
-                      background: T.em,
-                      flexShrink: 0,
-                    }}
-                  />
-                )}
-              </Link>
-            );
-          })}
-        </nav>
-
-        {/* Spacer */}
-        <div style={{ flex: 1 }} />
-
-        {/* Footer */}
-        <div
-          style={{
-            display: "grid",
-            gap: T.s6,
-            fontSize: 11,
-            color: T.inkSoft,
-          }}
-        >
-          <div>BOCC · Internal use only</div>
-        </div>
-      </aside>
-
-      {/* Main content */}
-      <div
-        style={{
-          flex: 1,
-          minWidth: 0,
-          maxWidth: "100%",
-          padding: T.s16,
-          overflow: "auto",
-          background: T.panel,
-        }}
-      >
-        {/* Page header (dynamic title + breadcrumbs) */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            marginBottom: T.s16,
-            gap: T.s12,
-          }}
-        >
-          <div>
-            <h1
-              style={{
-                margin: 0,
-                fontSize: 20,
-                fontWeight: 800,
-                letterSpacing: 0.2,
-              }}
-            >
-              {pageTitle}
-            </h1>
-            <div style={{ marginTop: 4, fontSize: 12, color: T.inkSoft }}>
-              {crumbs.map((c, i) => (
-                <span key={c.href}>
-                  {i > 0 && <span style={{ opacity: 0.6 }}> / </span>}
-                  <Link href={c.href} style={{ color: T.inkSoft, textDecoration: "none" }}>
-                    {c.label}
+          <Separator />
+          <nav className="flex-1 p-3 space-y-1">
+            {NAV.map((item) => {
+              const active = pathname === item.href || pathname.startsWith(item.href + "/");
+              return (
+                <Button
+                  key={item.href}
+                  asChild
+                  variant={active ? "secondary" : "ghost"}
+                  className="w-full justify-between rounded-full"
+                >
+                  <Link href={item.href}>
+                    <span>{item.label}</span>
+                    {active && <span className="ml-2 h-2 w-2 rounded-full bg-emerald-500" />}
                   </Link>
-                </span>
-              ))}
-            </div>
-          </div>
+                </Button>
+              );
+            })}
+          </nav>
+          <div className="p-4 text-[11px] text-muted-foreground">BOCC · Internal use only</div>
+        </aside>
 
-          {/* Right-side utilities */}
-          <div style={{ display: "flex", alignItems: "center", gap: T.s8 }}>
-            {/* Theme toggle */}
-            <button
-              type="button"
-              onClick={() => setTheme((prev) => (prev === "dark" ? "light" : "dark"))}
-              style={{
-                borderRadius: 999,
-                border: `1px solid ${T.line}`,
-                padding: "6px 10px",
-                background: T.panel,
-                color: T.inkSoft,
-                fontSize: 12,
-                cursor: "pointer",
-              }}
-            >
-              {theme === "dark" ? "☀︎ Light" : "🌙 Dark"}
-            </button>
-
-            {/* Notifications (always has a dropdown, even if empty) */}
-            <div ref={notifRef} style={{ position: "relative" }}>
-              <button
-                type="button"
-                aria-haspopup="menu"
-                aria-expanded={notifOpen}
-                onClick={() => { setNotifOpen((v) => !v); setUserMenuOpen(false); }}
-                style={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: 999,
-                  border: `1px solid ${T.line}`,
-                  background: T.panel,
-                  color: T.inkSoft,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: 14,
-                  cursor: "pointer",
-                  position: "relative",
-                }}
-              >
-                🔔
-                {/* Badge can be shown conditionally later; keep a soft dot for presence */}
-                <span
-                  aria-hidden
-                  style={{
-                    position: "absolute",
-                    top: 6,
-                    right: 7,
-                    width: 7,
-                    height: 7,
-                    borderRadius: 999,
-                    background: T.em,
-                    opacity: 0.9,
-                  }}
-                />
-              </button>
-
-              {notifOpen && (
-                <div
-                  role="menu"
-                  aria-label="Notifications"
-                  style={{
-                    position: "absolute",
-                    top: "110%",
-                    right: 0,
-                    marginTop: 4,
-                    minWidth: 300,
-                    borderRadius: 12,
-                    border: `1px solid ${T.line}`,
-                    background: T.panel,
-                    boxShadow: "0 12px 30px rgba(15,23,42,0.25)",
-                    padding: 8,
-                    zIndex: 60,
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                    <strong style={{ fontSize: 13 }}>Notifications</strong>
-                    <span style={{ fontSize: 11, color: T.inkSoft }}>0 new</span>
+        {/* Main column */}
+        <div className="min-h-dvh flex flex-col">
+          {/* Header */}
+          <header className="sticky top-0 z-40 border-b bg-background/80 backdrop-blur">
+            <div className="flex h-14 items-center gap-2 px-3">
+              {/* Mobile: open sidebar */}
+              <Sheet>
+                <SheetTrigger asChild className="lg:hidden">
+                  <Button variant="outline" size="icon" aria-label="Open menu">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+                  </Button>
+                </SheetTrigger>
+                <SheetContent side="left" className="p-0 w-[240px]">
+                  <div className="flex items-center gap-3 p-4">
+                    <Image src="/logo.png" alt="BOCC" width={28} height={28} className="rounded-full" />
+                    <div className="text-sm font-extrabold tracking-tight">VariForce Admin</div>
                   </div>
-                  <div style={{ height: 1, background: T.line, opacity: 0.6, margin: "6px 0" }} />
+                  <Separator />
+                  <nav className="p-3 space-y-1">
+                    {NAV.map((item) => {
+                      const active = pathname === item.href || pathname.startsWith(item.href + "/");
+                      return (
+                        <Button
+                          key={item.href}
+                          asChild
+                          variant={active ? "secondary" : "ghost"}
+                          className="w-full justify-between rounded-full"
+                        >
+                          <Link href={item.href}>
+                            <span>{item.label}</span>
+                            {active && <span className="ml-2 h-2 w-2 rounded-full bg-emerald-500" />}
+                          </Link>
+                        </Button>
+                      );
+                    })}
+                  </nav>
+                </SheetContent>
+              </Sheet>
 
-                  {/* Empty state */}
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, padding: 8, borderRadius: 8, background: theme === "dark" ? "rgba(255,255,255,0.02)" : "#f9fafb" }}>
-                    <div style={{ fontSize: 16 }}>✅</div>
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 600 }}>All clear</div>
-                      <div style={{ fontSize: 12, color: T.inkSoft }}>No notifications right now.</div>
-                    </div>
-                  </div>
-                </div>
-              )}
+              {/* Breadcrumbs + title */}
+              <div className="flex min-w-0 items-center gap-3">
+                <Breadcrumb className="hidden sm:block">
+                  <BreadcrumbList>
+                    {crumbs.map((c, i) => (
+                      <BreadcrumbItem key={c.href}>
+                        {i < crumbs.length - 1 ? (
+                          <>
+                            <BreadcrumbLink asChild>
+                              <Link href={c.href}>{c.label}</Link>
+                            </BreadcrumbLink>
+                            <BreadcrumbSeparator />
+                          </>
+                        ) : (
+                          <BreadcrumbPage>{c.label}</BreadcrumbPage>
+                        )}
+                      </BreadcrumbItem>
+                    ))}
+                  </BreadcrumbList>
+                </Breadcrumb>
+                <div className="truncate text-sm font-semibold sm:hidden">{pageTitle}</div>
+              </div>
+
+              <div className="ml-auto flex items-center gap-2">
+                {/* Theme toggle */}
+                <LocalThemeToggle />
+
+                {/* Notifications */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="icon" aria-label="Notifications">
+                      🔔
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-64">
+                    <DropdownMenuLabel>Notifications</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem className="text-muted-foreground">All clear — no new notifications.</DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                {/* Account */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" className="gap-2 px-2">
+                      <Avatar className="h-6 w-6">
+                        <AvatarFallback>A</AvatarFallback>
+                      </Avatar>
+                      <span className="hidden sm:inline text-sm">Admin</span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-56">
+                    <DropdownMenuLabel>Signed in as</DropdownMenuLabel>
+                    <DropdownMenuItem className="text-muted-foreground">admin@bocc.sa</DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem asChild>
+                      <Link href="/admin/logout" className="text-red-600">Log out</Link>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             </div>
+          </header>
 
-            {/* User pill + dropdown (existing logic retained) */}
-            <div style={{ position: "relative" }}>
-              <button
-                type="button"
-                onClick={() => { setUserMenuOpen((open) => !open); setNotifOpen(false); }}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: T.s6,
-                  padding: "4px 10px",
-                  borderRadius: 999,
-                  border: `1px solid ${T.line}`,
-                  background: T.panel,
-                  fontSize: 12,
-                  cursor: "pointer",
-                }}
-              >
-                <div
-                  style={{
-                    width: 24,
-                    height: 24,
-                    borderRadius: 999,
-                    background: T.emSoft,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontWeight: 700,
-                    fontSize: 11,
-                  }}
-                >
-                  A
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.2 }}>
-                  <span>Admin</span>
-                  <span style={{ color: T.inkSoft, fontSize: 11 }}>admin@bocc.sa</span>
-                </div>
-              </button>
-
-              {userMenuOpen && (
-                <div
-                  style={{
-                    position: "absolute",
-                    top: "110%",
-                    right: 0,
-                    marginTop: 4,
-                    minWidth: 180,
-                    borderRadius: 12,
-                    border: `1px solid ${T.line}`,
-                    background: T.panel,
-                    boxShadow: "0 12px 30px rgba(15,23,42,0.25)",
-                    padding: 6,
-                    fontSize: 13,
-                    zIndex: 50,
-                  }}
-                >
-                  <div style={{ padding: "6px 10px", borderRadius: 8, fontSize: 12, color: T.inkSoft }}>
-                    Signed in as
-                    <div style={{ fontWeight: 600, color: T.ink }}>admin@bocc.sa</div>
-                  </div>
-                  <div style={{ height: 1, background: T.line, margin: "4px 0", opacity: 0.6 }} />
-                  <Link
-                    href="/admin/logout"
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      padding: "6px 10px",
-                      borderRadius: 8,
-                      textDecoration: "none",
-                      color: "#b91c1c",
-                      fontSize: 13,
-                    }}
-                  >
-                    <span>Log out</span>
-                  </Link>
-                </div>
-              )}
-            </div>
-          </div>
+          {/* Routed content */}
+          <main className="flex-1 px-3 py-4 md:px-6 lg:px-8">{children}</main>
         </div>
-
-        {/* Routed page content */}
-        {children}
       </div>
     </div>
   );

@@ -9,6 +9,7 @@ import { createClient } from "@supabase/supabase-js";
 import { Zap } from "lucide-react";
 
 import { Kelly_Slab } from "next/font/google";
+import { Button } from "@/components/ui/button";
 const variforceFont = Kelly_Slab({
   weight: "400",
   subsets: ["latin"],
@@ -390,6 +391,32 @@ export default function SignupPage({ searchParams }: { searchParams: Promise<{ l
   const [resendTimer, setResendTimer] = useState(0);
   const [phoneErr, setPhoneErr] = useState<string|null>(null);
 
+  // Pending application modal state
+  const [pendingOpen, setPendingOpen] = useState(false);
+  const [pendingInfo, setPendingInfo] = useState<{ id?: string; reviewed_at?: string | null } | null>(null);
+
+  async function checkApplicationStatusByPhone(rawPhone: string) {
+    try {
+      const supa = getSupabase();
+      if (!supa) return null;
+      let normalized = (rawPhone || "").replace(/\D/g, "");
+      if (normalized.startsWith("05")) normalized = normalized.slice(1);
+      if (!normalized.startsWith("966")) normalized = "966" + normalized;
+      // Query most recent application for this phone
+      const { data, error } = await supa
+        .from("partners_applications")
+        .select("id,status,reviewed_at,submitted_at")
+        .eq("phone", normalized)
+        .order("submitted_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) return null;
+      return data as (null | { id: string; status: string; reviewed_at: string | null });
+    } catch {
+      return null;
+    }
+  }
+
   const [profile, setProfile] = useState<CompanyProfile>(initialProfile);
 
   // ---- Supabase Storage (CR/VAT) ----
@@ -488,6 +515,32 @@ export default function SignupPage({ searchParams }: { searchParams: Promise<{ l
       const j = await r.json();
       if (!r.ok) throw new Error(j?.error || "Invalid code");
       setMsg(t("verified"));
+      // After OTP verify, decide path based on existing application status (service-role API)
+      try {
+        const s = await fetch("/api/partners/status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ phone: normalized })
+        }).then(r => r.json());
+
+        if (s?.exists) {
+          if (s.status === "pending") {
+            setPendingInfo({ id: s.id, reviewed_at: s.reviewed_at || null });
+            setMsg(t("underReview"));
+            setPendingOpen(true);
+            setLoading(false);
+            return; // stop here, keep user on modal
+          }
+          if (s.status === "approved") {
+            // Already approved → take them to login
+            window.location.href = `/portal/login?lang=${lang}`;
+            return;
+          }
+          // any other status → proceed to form
+        }
+      } catch (e) {
+        // if status check fails, fall back to form
+      }
       setStep("company");
       try { window.localStorage.setItem("last_phone", normalized); } catch {}
     } catch (e:any) {
@@ -501,6 +554,26 @@ export default function SignupPage({ searchParams }: { searchParams: Promise<{ l
   // and handle storage uploads + DB upsert with the Supabase Service Role.
   async function submitCompanyProfile() {
     setErr(null); setMsg(null);
+
+    // Prevent duplicate submission using service-role API status
+    try {
+      const s = await fetch("/api/partners/status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone })
+      }).then(r => r.json());
+
+      if (s?.exists && s.status === "pending") {
+        setPendingInfo({ id: s.id, reviewed_at: s.reviewed_at || null });
+        setMsg(t("underReview"));
+        setPendingOpen(true);
+        return;
+      }
+      if (s?.exists && s.status === "approved") {
+        window.location.href = `/portal/login?lang=${lang}`;
+        return;
+      }
+    } catch {}
 
     // Basic validation
     if (!profile.companyName.trim()) { setErr(t("errCompany")); return; }
@@ -592,49 +665,6 @@ export default function SignupPage({ searchParams }: { searchParams: Promise<{ l
   );
   return (
     <div className="relative min-h-screen" dir={dir} data-lang={lang} suppressHydrationWarning>
-      <style jsx global>{`
-        .bolt-text {
-          background: linear-gradient(90deg, #22c55e, #06b6d4, #22c55e);
-          -webkit-background-clip: text;
-          background-clip: text;
-          color: transparent;
-          background-size: 200% 100%;
-          animation: bolt-shimmer 4s linear infinite;
-          text-shadow: 0 0 14px rgba(34,197,94,0.45), 0 0 28px rgba(6,182,212,0.35);
-        }
-        @keyframes bolt-shimmer {
-          0% { background-position: 0% 50%; }
-          100% { background-position: 200% 50%; }
-        }
-        @keyframes shimmer {
-          0% { background-position: 0% 50%; }
-          100% { background-position: 200% 50%; }
-        }
-        /* Breathing lightning + glow */
-        .bolt-breathe { animation: bolt-breathe 2.6s ease-in-out infinite; will-change: transform, filter; }
-        .glow-breathe { animation: glow-breathe 3.2s ease-in-out infinite; }
-        @keyframes glow-breathe {
-          0%, 100% { opacity: 0.22; }
-          50% { opacity: 0.5; }
-        }
-        @keyframes bolt-breathe {
-          0%, 100% {
-            transform: translateY(0) scale(1.0);
-            opacity: 0.55;
-            filter: drop-shadow(0 0 8px rgba(16,185,129,0.35));
-          }
-          50% {
-            transform: translateY(-1px) scale(1.03);
-            opacity: 0.98;
-            filter: drop-shadow(0 0 18px rgba(16,185,129,0.75));
-          }
-        }
-        /* generic breathe animation used for the bolt glow */
-        @keyframes breathe { 0%,100% { transform: scale(1); opacity: .6; } 50% { transform: scale(1.15); opacity: .95; } }
-        .animate-breathe { animation: breathe 2.2s ease-in-out infinite; will-change: transform, opacity; }
-        /* Tint any monochrome SVG/PNG to Tailwind emerald-600 (#059669) */
-        .tint-emerald-600 { filter: invert(41%) sepia(84%) saturate(470%) hue-rotate(119deg) brightness(92%) contrast(96%); }
-      `}</style>
       {/* Background video */}
       <video
         className="pointer-events-none fixed inset-0 w-full h-full object-cover z-0"
@@ -712,11 +742,11 @@ export default function SignupPage({ searchParams }: { searchParams: Promise<{ l
           {/* Right: signup card */}
           <section className="flex justify-center">
             <div className="w-full max-w-md sm:max-w-lg">
-              <div className="relative isolate overflow-hidden rounded-3xl border border-emerald-200 bg-white/95 backdrop-blur-xl shadow-lg">
+              <div className="relative isolate overflow-hidden rounded-3xl glass-emerald shadow-glass">
                 <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_10%,rgba(16,185,129,0.08),transparent_30%),radial-gradient(circle_at_80%_20%,rgba(6,182,212,0.08),transparent_32%)]" />
                 <div className="relative z-10 p-4 sm:p-5 mx-auto max-w-2xl">
           <a
-            href="/partners"
+            href="https://bocc.sa/partners?lang=en"
             className="mb-4 inline-flex items-center text-sm text-emerald-700 hover:text-emerald-900"
           >
             {t("back")}
@@ -783,13 +813,13 @@ export default function SignupPage({ searchParams }: { searchParams: Promise<{ l
                 />
                 {phoneErr && <div className="mt-1 text-xs text-red-600">{phoneErr}</div>}
               </div>
-              <button
+              <Button
                 onClick={sendOTP}
                 disabled={loading}
                 className="w-full h-11 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-sm disabled:opacity-60 transition-colors"
               >
                 {loading ? "Sending…" : t("sendCode")}
-              </button>
+              </Button>
 
               <div className="mt-4 text-xs text-gray-600">
                 {t("byContinue")}{" "}
@@ -818,13 +848,13 @@ export default function SignupPage({ searchParams }: { searchParams: Promise<{ l
                 maxLength={6}
                 dir="ltr"
               />
-              <button
+              <Button
                 onClick={verifyOTP}
                 disabled={loading}
                 className="w-full h-11 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-sm disabled:opacity-60 transition-colors"
               >
                 {loading ? t("verifying") : t("verifyContinue")}
-              </button>
+              </Button>
 
               <div className="mt-4 flex items-center justify-between text-sm text-gray-700">
                 <a className="text-emerald-600 hover:underline" onClick={sendOTP}>
@@ -1042,13 +1072,13 @@ export default function SignupPage({ searchParams }: { searchParams: Promise<{ l
                 </label>
               </div>
 
-              <button
+              <Button
                 onClick={submitCompanyProfile}
                 disabled={loading}
                 className="mt-5 w-full h-11 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-sm disabled:opacity-60 transition-colors"
               >
                 {loading ? "Saving…" : t("save")}
-              </button>
+              </Button>
             </>
           )}
                 </div>
@@ -1057,6 +1087,32 @@ export default function SignupPage({ searchParams }: { searchParams: Promise<{ l
           </section>
         </div>
       </main>
+        {/* Pending Application Modal */}
+        {pendingOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setPendingOpen(false)} />
+            <div className="relative z-10 w-[92vw] max-w-md rounded-2xl glass-emerald shadow-glass border-glass p-5">
+              <div className="flex items-start gap-3">
+                <div className="shrink-0 h-9 w-9 rounded-full bg-emerald-600/15 grid place-items-center">
+                  <img src="/whatsapp.svg" alt="WhatsApp" className="h-4 w-4 tint-emerald-600" />
+                </div>
+                <div className="grow">
+                  <h3 className="text-base font-semibold text-slate-900">Application under review</h3>
+                  <p className="mt-1 text-sm text-slate-600">{t("underReview")}</p>
+                  {pendingInfo?.reviewed_at ? (
+                    <p className="mt-1 text-xs text-slate-500">Last activity: {new Date(pendingInfo.reviewed_at).toLocaleString()}</p>
+                  ) : null}
+                  <div className="mt-4 flex flex-col sm:flex-row gap-2">
+                    <Button onClick={() => setPendingOpen(false)} className="rounded-full">OK</Button>
+                    <a href="/portal/login" className="inline-flex items-center justify-center h-10 px-4 rounded-full border border-emerald-300 text-emerald-700 hover:bg-emerald-50">
+                      Go to Login
+                    </a>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
     {/* Footer (text-only) */}
     <footer className="absolute bottom-0 w-full z-10 border-t border-white/20 bg-black/40 backdrop-blur-sm text-gray-200">
       <div className="mx-auto max-w-6xl px-4 py-4 flex flex-col md:flex-row items-center justify-between gap-2">

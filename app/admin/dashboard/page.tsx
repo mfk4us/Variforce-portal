@@ -1,24 +1,30 @@
 import * as React from "react";
-
+import Link from "next/link";
 import { createClient } from "@supabase/supabase-js";
 
-// UI components (shadcn/ui)
+// shadcn/ui (local kit via barrel)
 import {
   Card,
   CardHeader,
   CardTitle,
   CardContent,
-} from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import {
+  Badge,
   Table,
   TableBody,
   TableCell,
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table";
-import { Separator } from "@/components/ui/separator";
+  Separator,
+  Button,
+  Alert,
+  AlertTitle,
+  AlertDescription,
+} from "@/components/ui";
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+export const fetchCache = "force-no-store";
 
 type Status = "pending" | "approved" | "rejected" | null;
 
@@ -29,56 +35,44 @@ type ApplicationRow = {
   status: Status;
 };
 
-// Server-side Supabase admin client using service role key.
-// This code only runs on the server (no "use client" in this file).
+// Server-side Supabase admin client using service role key (server-only)
 function adminClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
   if (!url || !key) {
-    throw new Error(
-      "Missing Supabase env: NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY"
-    );
+    throw new Error("Missing Supabase env: NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
   }
-
-  return createClient(url, key, {
-    auth: { persistSession: false },
-  });
+  return createClient(url, key, { auth: { persistSession: false } });
 }
 
-async function fetchApplicationStats() {
+async function fetchDashboardData() {
   const supabase = adminClient();
 
-  const { data, error, count } = await supabase
+  // Accurate counts using head-only selects
+  const [totalRes, pendingRes, approvedRes, rejectedRes] = await Promise.all([
+    supabase.from("partners_applications").select("*", { count: "exact", head: true }),
+    supabase.from("partners_applications").select("*", { count: "exact", head: true }).eq("status", "pending"),
+    supabase.from("partners_applications").select("*", { count: "exact", head: true }).eq("status", "approved"),
+    supabase.from("partners_applications").select("*", { count: "exact", head: true }).eq("status", "rejected"),
+  ]);
+
+  const counts = {
+    total: totalRes.count ?? 0,
+    pending: pendingRes.count ?? 0,
+    approved: approvedRes.count ?? 0,
+    rejected: rejectedRes.count ?? 0,
+  };
+
+  // Recent rows snapshot (last 10 by id desc)
+  const { data: rowsData, error: rowsError } = await supabase
     .from("partners_applications")
-    .select("id, company_name, city, status", { count: "exact" })
-    .order("id", { ascending: false }) // newest first
+    .select("id, company_name, city, status")
+    .order("id", { ascending: false })
     .limit(10);
 
-  if (error) {
-    console.error("Error fetching partner applications for dashboard:", error);
-  }
+  if (rowsError) throw rowsError;
 
-  const rows: ApplicationRow[] = (data || []) as ApplicationRow[];
-
-  const total = count ?? rows.length;
-  let pending = 0;
-  let approved = 0;
-  let rejected = 0;
-
-  for (const row of rows) {
-    if (row.status === "pending") pending += 1;
-    else if (row.status === "approved") approved += 1;
-    else if (row.status === "rejected") rejected += 1;
-  }
-
-  return {
-    total,
-    pending,
-    approved,
-    rejected,
-    rows,
-  };
+  return { counts, rows: (rowsData || []) as ApplicationRow[] };
 }
 
 function statusBadge(status: Status) {
@@ -104,8 +98,46 @@ function statusBadge(status: Status) {
 }
 
 export default async function AdminDashboardPage() {
-  const { total, pending, approved, rejected, rows } =
-    await fetchApplicationStats();
+  const result = await (async () => {
+    try {
+      const data = await fetchDashboardData();
+      return { ok: true as const, ...data };
+    } catch (error: unknown) {
+      return { ok: false as const, error };
+    }
+  })();
+
+  if (!result.ok) {
+    const err = result.error;
+    const message = err instanceof Error ? err.message : String(err);
+    return (
+      <main className="min-h-[calc(100vh-64px)] w-full px-4 py-6 md:px-6 lg:px-8">
+        <Card className="border-white/20 dark:border-white/10">
+          <CardHeader>
+            <CardTitle>Dashboard</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Alert variant="destructive">
+              <AlertTitle>We couldn’t load dashboard data</AlertTitle>
+              <AlertDescription>
+                Please check your Supabase credentials or network and try again.
+              </AlertDescription>
+            </Alert>
+            {process.env.NODE_ENV !== "production" && (
+              <pre className="mt-3 text-xs whitespace-pre-wrap break-words p-3 rounded-lg bg-muted/40">{message}</pre>
+            )}
+            <div className="mt-4">
+              <Button asChild>
+                <Link href="/admin/partner-applications">Go to Applications</Link>
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </main>
+    );
+  }
+
+  const { counts, rows } = result;
 
   return (
     <main className="min-h-[calc(100vh-64px)] w-full px-4 py-6 md:px-6 lg:px-8 space-y-6">
@@ -114,61 +146,43 @@ export default async function AdminDashboardPage() {
         <Card className="border-white/20 dark:border-white/10 backdrop-blur supports-[backdrop-filter]:bg-white/60 dark:supports-[backdrop-filter]:bg-black/40">
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                Total applications
-              </CardTitle>
-              <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/20">
-                Live
-              </Badge>
+              <CardTitle className="text-sm font-medium text-muted-foreground">Total applications</CardTitle>
+              <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/20">Live</Badge>
             </div>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-semibold tracking-tight">{total}</div>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Count of all partner applications currently stored.
-            </p>
+            <div className="text-2xl font-semibold tracking-tight">{counts.total}</div>
+            <p className="mt-1 text-xs text-muted-foreground">Count of all partner applications currently stored.</p>
           </CardContent>
         </Card>
 
         <Card className="border-white/20 dark:border-white/10 backdrop-blur supports-[backdrop-filter]:bg-white/60 dark:supports-[backdrop-filter]:bg-black/40">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Pending
-            </CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">Pending</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-xl font-semibold">{pending}</div>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Awaiting your review and decision.
-            </p>
+            <div className="text-xl font-semibold">{counts.pending}</div>
+            <p className="mt-1 text-xs text-muted-foreground">Awaiting your review and decision.</p>
           </CardContent>
         </Card>
 
         <Card className="border-white/20 dark:border-white/10 backdrop-blur supports-[backdrop-filter]:bg-white/60 dark:supports-[backdrop-filter]:bg-black/40">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Approved
-            </CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">Approved</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-xl font-semibold">{approved}</div>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Ready to onboard into BOCC&apos;s partner network.
-            </p>
+            <div className="text-xl font-semibold">{counts.approved}</div>
+            <p className="mt-1 text-xs text-muted-foreground">Ready to onboard into BOCC&apos;s partner network.</p>
           </CardContent>
         </Card>
 
         <Card className="border-white/20 dark:border-white/10 backdrop-blur supports-[backdrop-filter]:bg-white/60 dark:supports-[backdrop-filter]:bg-black/40">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Rejected
-            </CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">Rejected</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-xl font-semibold">{rejected}</div>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Closed applications kept for records.
-            </p>
+            <div className="text-xl font-semibold">{counts.rejected}</div>
+            <p className="mt-1 text-xs text-muted-foreground">Closed applications kept for records.</p>
           </CardContent>
         </Card>
       </section>
@@ -178,17 +192,18 @@ export default async function AdminDashboardPage() {
         {/* Recent Applications */}
         <Card className="lg:col-span-3 border-white/20 dark:border-white/10 backdrop-blur supports-[backdrop-filter]:bg-white/60 dark:supports-[backdrop-filter]:bg-black/40">
           <CardHeader className="pb-2">
-            <CardTitle className="text-base">Recent applications</CardTitle>
+            <div className="flex items-center justify-between gap-2">
+              <CardTitle className="text-base">Recent applications</CardTitle>
+              <Button asChild size="sm" variant="outline">
+                <Link href="/admin/partner-applications">Review all</Link>
+              </Button>
+            </div>
           </CardHeader>
           <CardContent>
-            <p className="text-sm text-muted-foreground mb-4">
-              A quick snapshot of the latest activity across partner onboarding.
-            </p>
-
+            <p className="text-sm text-muted-foreground mb-4">A quick snapshot of the latest activity across partner onboarding.</p>
             {rows.length === 0 ? (
               <div className="rounded-lg border border-dashed border-muted-foreground/30 p-8 text-center text-sm text-muted-foreground">
-                No applications found yet. Once partners start applying, their
-                submissions will be listed here.
+                No applications found yet. Once partners start applying, their submissions will be listed here.
               </div>
             ) : (
               <div className="rounded-lg border border-muted/30 overflow-hidden">
@@ -203,17 +218,11 @@ export default async function AdminDashboardPage() {
                   </TableHeader>
                   <TableBody>
                     {rows.map((row) => (
-                      <TableRow key={row.id}>
-                        <TableCell className="font-medium break-words">
-                          {row.company_name || `Application #${row.id}`}
-                        </TableCell>
-                        <TableCell className="text-muted-foreground break-words">
-                          {row.city || "Not set"}
-                        </TableCell>
+                      <TableRow key={row.id} className="hover:bg-emerald-50/40 dark:hover:bg-emerald-900/10">
+                        <TableCell className="font-medium break-words">{row.company_name || `Application #${row.id}`}</TableCell>
+                        <TableCell className="text-muted-foreground break-words">{row.city || "Not set"}</TableCell>
                         <TableCell>{statusBadge(row.status)}</TableCell>
-                        <TableCell className="text-right text-xs text-muted-foreground">
-                          #{row.id}
-                        </TableCell>
+                        <TableCell className="text-right text-xs text-muted-foreground">#{row.id}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -229,18 +238,14 @@ export default async function AdminDashboardPage() {
             <CardTitle className="text-base">Admin focus</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <p className="text-sm text-muted-foreground">
-              Suggested next actions based on your current application pipeline.
-            </p>
+            <p className="text-sm text-muted-foreground">Suggested next actions based on your current application pipeline.</p>
 
             <div className="space-y-4">
               <div className="rounded-lg border border-muted/30 p-4">
                 <strong className="block mb-1 text-sm">Pending queue</strong>
                 <span className="text-sm text-muted-foreground">
-                  {pending > 0
-                    ? `You currently have ${pending} pending application${
-                        pending === 1 ? "" : "s"
-                      }. Prioritise reviewing these to keep partners moving.`
+                  {counts.pending > 0
+                    ? `You currently have ${counts.pending} pending application${counts.pending === 1 ? "" : "s"}. Prioritise reviewing these to keep partners moving.`
                     : "You have no pending applications — great job staying on top of the queue."}
                 </span>
               </div>
@@ -248,10 +253,8 @@ export default async function AdminDashboardPage() {
               <div className="rounded-lg border border-muted/30 p-4">
                 <strong className="block mb-1 text-sm">Approved partners</strong>
                 <span className="text-sm text-muted-foreground">
-                  {approved > 0
-                    ? `There ${approved === 1 ? "is" : "are"} ${approved} approved partner${
-                        approved === 1 ? "" : "s"
-                      }. Make sure their onboarding, contacts and pricing are fully configured.`
+                  {counts.approved > 0
+                    ? `There ${counts.approved === 1 ? "is" : "are"} ${counts.approved} approved partner${counts.approved === 1 ? "" : "s"}. Make sure their onboarding, contacts and pricing are fully configured.`
                     : "Once you approve applications, they will appear here as a reminder to finish onboarding tasks."}
                 </span>
               </div>
@@ -259,17 +262,23 @@ export default async function AdminDashboardPage() {
               <div className="rounded-lg border border-muted/30 p-4">
                 <strong className="block mb-1 text-sm">Data quality</strong>
                 <span className="text-sm text-muted-foreground">
-                  Use the partner applications page to spot missing cities, contacts or notes.
-                  Clean data makes your rate-book and white-labelling work much smoother.
+                  Use the partner applications page to spot missing cities, contacts or notes. Clean data makes your rate-book and white-labelling work much smoother.
                 </span>
               </div>
             </div>
 
             <Separator className="my-2" />
 
-            <p className="text-xs text-muted-foreground">
-              Tip: Add filters &amp; bulk actions later with our table patterns.
-            </p>
+            <div className="flex items-center gap-2">
+              <Button asChild size="sm" className="rounded-full">
+                <Link href="/admin/partner-applications">Go to Applications</Link>
+              </Button>
+              <Button asChild size="sm" variant="outline" className="rounded-full">
+                <Link href="/portal/login">Open Portal (Client View)</Link>
+              </Button>
+            </div>
+
+            <p className="text-xs text-muted-foreground">Tip: Add filters &amp; bulk actions later with our table patterns.</p>
           </CardContent>
         </Card>
       </section>
