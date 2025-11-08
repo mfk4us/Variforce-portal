@@ -1,0 +1,12 @@
+User-agent: *
+Allow: /
+Disallow: /admin/
+Disallow: /portal/
+Disallow: /api/
+Disallow: /dashboard/
+Disallow: /settings/
+
+Sitemap: https://bocc.sa/sitemap.xml
+Sitemap: https://bocc.sa/sitemap/partners.xml
+
+Host: https://bocc.sa
