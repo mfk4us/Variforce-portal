@@ -2,7 +2,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { supabase } from "@/lib/supabaseClient";
+import { supabase } from "@/lib/supabase/client";
 import { Zap, Mail, Lock } from "lucide-react";
 import { Kelly_Slab } from "next/font/google";
 const kellySlab = Kelly_Slab({ weight: "400", subsets: ["latin"], display: "swap" });
