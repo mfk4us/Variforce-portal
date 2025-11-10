@@ -1,33 +1,29 @@
-import { cookies } from 'next/headers'
 import { createServiceClient } from './server'
+import { redirect } from 'next/navigation'
 
-export async function getCurrentUser() {
-  const access = cookies().get('sb-access-token')?.value
-  if (!access) return null
-  const supabase = createServiceClient()
-  const { data } = await supabase.auth.getUser(access)
-  return data.user ?? null
-}
-
-export async function getCurrentMember() {
-  const user = await getCurrentUser()
-  if (!user) return null
+// Returns { user, member, tenantId, isInternal }
+export async function getAuthContext(userId: string | null) {
+  if (!userId) return { user: null, member: null, tenantId: null, isInternal: false }
 
   const supabase = createServiceClient()
-  const { data, error } = await supabase
+  const { data: memberRows, error } = await supabase
     .from('members')
     .select('*')
-    .eq('user_id', user.id)
+    .eq('user_id', userId)
     .order('created_at', { ascending: true })
     .limit(1)
 
   if (error) throw new Error(error.message)
-  return data?.[0] ?? null
+  const member = memberRows?.[0] ?? null
+  const tenantId = member?.tenant_id ?? null
+  const isInternal = member?.tenant_id === null
+
+  return { user: { id: userId }, member, tenantId, isInternal }
 }
 
-export async function getTenantContext(tenantId: string) {
-  const member = await getCurrentMember()
-  if (!member) throw new Error('Not authenticated')
-  // If member.tenant_id is null (BOCC internal), allow cross-tenant ops via UI guard.
-  return { member, tenantId }
+// Simple guard for server components
+export async function requirePortalAccess(userId: string | null) {
+  const ctx = await getAuthContext(userId)
+  if (!ctx.user) redirect('/portal/login')
+  return ctx
 }

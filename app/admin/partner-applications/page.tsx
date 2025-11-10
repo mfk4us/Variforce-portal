@@ -8,6 +8,15 @@ import Script from "next/script";
 import { Button, Input, Badge, Card, CardContent } from "@/components/ui";
 import crypto from "node:crypto";
 
+// Helpers for slug generation
+function slugify(s: string) {
+  return (s || "").toLowerCase().replace(/['"]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
+}
+function withRandSuffix(s: string) {
+  const r = Math.random().toString(36).slice(2, 6);
+  return `${s}-${r}`;
+}
+
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 export const fetchCache = "force-no-store";
@@ -45,98 +54,101 @@ function adminClient() {
   return createClient(url, serviceKey, { auth: { persistSession: false } });
 }
 
-// Helper to create tenant and invite, returning invite URL
+// Helper to create tenant, link application, and invite manager. Returns invite URL.
 async function createTenantAndInviteForApp(app: {
+  id: string;
   company_name: string;
-  contact_email?: string | null;
-  contact_phone?: string | null;
-  role?: "owner" | "admin" | "member";
+  contact_name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  city?: string | null;
+  industry?: string | null;
+  lang?: string | null;
+  want_rate_book?: boolean | null;
+  cr_number?: string | null;
+  vat_number?: string | null;
+  cr_path?: string | null;
+  vat_path?: string | null;
 }) {
   const supabase = adminClient();
 
-  // 1) Ensure tenant exists (name only to avoid schema mismatches)
-  const { data: foundTenant } = await supabase
+  // 1) Build a unique slug
+  let slug = slugify(app.company_name || "partner");
+  const { data: foundSlug } = await supabase.from("tenants").select("id").eq("slug", slug).maybeSingle();
+  if (foundSlug) slug = withRandSuffix(slug);
+
+  // 2) Create tenant with mapped fields (start as pending until docs verified)
+  const { data: tenant, error: tErr } = await supabase
     .from("tenants")
-    .select("id,name")
-    .eq("name", app.company_name)
-    .maybeSingle();
+    .insert({
+      name: app.company_name || "Partner",
+      slug,
+      status: "pending",
+      phone: app.phone ?? null,
+      language: app.lang ?? "en",
+      city: app.city ?? null,
+      industry: app.industry ?? null,
+      rate_book_enabled: !!app.want_rate_book,
+      primary_contact_name: app.contact_name ?? null,
+      primary_contact_email: app.email ?? null,
+      cr_number: app.cr_number ?? null,
+      vat_number: app.vat_number ?? null,
+      cr_doc_url: app.cr_path ?? null,
+      vat_doc_url: app.vat_path ?? null,
+    })
+    .select("id, slug")
+    .single();
+  if (tErr || !tenant) throw tErr || new Error("Failed to create tenant");
 
-  let tenantId = foundTenant?.id as string | undefined;
-  if (!tenantId) {
-    const { data: created, error: tErr } = await supabase
-      .from("tenants")
-      .insert({ name: app.company_name })
-      .select("id")
-      .single();
-    if (tErr) throw tErr;
-    tenantId = created.id as string;
-  }
+  // 3) Link application to tenant and mark approved/Reviewed now
+  const { error: linkErr } = await supabase
+    .from("partners_applications")
+    .update({
+      status: "approved",
+      tenant_id: tenant.id,
+      reviewed_at: new Date().toISOString(),
+    })
+    .eq("id", app.id);
+  if (linkErr) throw linkErr;
 
-  const base =
-    process.env.NEXT_PUBLIC_SITE_URL ||
-    process.env.NEXT_PUBLIC_PORTAL_URL ||
-    "";
+  // 4) Invite manager via Supabase Auth (metadata carries default_tenant_id + role)
+  const base = process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_PORTAL_URL || "";
 
-  // 2) Preferred path: **send email using Supabase Auth Invite**
-  // This triggers your Supabase → Emails → "Invite user" template.
-  // We also embed tenant/role into user_metadata so your login handler can attach membership.
   let actionLink: string | undefined;
-  if (app.contact_email) {
-    try {
-      // Send the actual email (uses your SMTP settings in Supabase)
-      const { error: inviteErr } = await (supabase as any).auth.admin.inviteUserByEmail(
-        app.contact_email,
-        {
-          redirectTo: `${base}/portal/login`,
-          data: {
-            invite_tenant_id: tenantId,
-            invite_role: app.role ?? "owner",
-          },
-        }
-      );
-      if (inviteErr) throw inviteErr;
+  if (app.email) {
+    // Send invite email
+    const { error: inviteErr } = await (supabase as any).auth.admin.inviteUserByEmail(app.email, {
+      redirectTo: `${base}/portal/login`,
+      data: {
+        full_name: `${app.company_name} Manager`,
+        default_tenant_id: tenant.id,
+        role: "company_manager",
+      },
+    });
+    if (inviteErr) {
+      console.warn("inviteUserByEmail failed, will still try to generate link:", inviteErr?.message || inviteErr);
+    }
 
-      // Also generate the link so we can show "Copy link" in the UI
-      const { data: linkData, error: linkErr } = await (supabase as any).auth.admin.generateLink({
-        type: "signup",
-        email: app.contact_email,
-        options: {
-          redirectTo: `${base}/portal/login`,
-          data: {
-            invite_tenant_id: tenantId,
-            invite_role: app.role ?? "owner",
-          },
+    // Generate a signup link with same metadata so we can show Copy Link in UI
+    const { data: linkData, error: linkGenErr } = await (supabase as any).auth.admin.generateLink({
+      type: "signup",
+      email: app.email,
+      options: {
+        redirectTo: `${base}/portal/login`,
+        data: {
+          full_name: `${app.company_name} Manager`,
+          default_tenant_id: tenant.id,
+          role: "company_manager",
         },
-      });
-      if (!linkErr) {
-        actionLink = (linkData?.action_link || linkData?.properties?.action_link) as string | undefined;
-      }
-      if (actionLink) return actionLink; // prefer the auth-generated link if available
-    } catch (_) {
-      // fall through to custom invite
+      },
+    });
+    if (!linkGenErr) {
+      actionLink = (linkData?.action_link || linkData?.properties?.action_link) as string | undefined;
     }
   }
 
-  // 3) Fallback: Signed code invite stored in `invites` (works for phone-only or GoTrue failures)
-  const raw = crypto.randomUUID();
-  const secret = process.env.INVITE_SIGNING_SECRET || "insecure-dev-secret";
-  const sig = crypto.createHmac("sha256", secret).update(raw).digest("hex").slice(0, 12);
-  const code = `${raw}.${sig}`;
-  const expires_at = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
-
-  const payload: Record<string, any> = {
-    tenant_id: tenantId,
-    role: app.role ?? "owner",
-    code,
-    expires_at,
-  };
-  if (app.contact_email) payload.email = app.contact_email;
-  if (app.contact_phone) payload.phone = app.contact_phone;
-
-  const { error: iErr } = await supabase.from("invites").insert(payload);
-  if (iErr) throw iErr;
-
-  return `${base}/portal/invite/${encodeURIComponent(code)}`;
+  // Fallback: if no email or link generation failed, provide an empty string to avoid breaking UI
+  return { inviteUrl: actionLink || "", tenantId: tenant.id, slug: tenant.slug };
 }
 
 export async function decideAction(formData: FormData) {
@@ -157,58 +169,36 @@ export async function decideAction(formData: FormData) {
       .eq("id", id);
   }
 
-  if (decision === "resend") {
+  if (decision === "resend" || decision === "approved") {
     try {
       const { data: appRow, error: aErr } = await supabase
         .from("partners_applications")
-        .select("company_name, email, phone")
+        .select("id, company_name, contact_name, email, phone, city, industry, lang, want_rate_book, cr_number, vat_number, cr_path, vat_path")
         .eq("id", id)
         .single();
-      if (aErr) throw aErr;
+      if (aErr || !appRow) throw aErr || new Error("Application not found");
 
-      const inviteUrl = await createTenantAndInviteForApp({
-        company_name: appRow?.company_name || "Partner",
-        contact_email: appRow?.email || null,
-        contact_phone: appRow?.phone || null,
-        role: "owner",
+      const { inviteUrl } = await createTenantAndInviteForApp({
+        id: appRow.id,
+        company_name: appRow.company_name || "Partner",
+        contact_name: appRow.contact_name ?? null,
+        email: appRow.email ?? null,
+        phone: appRow.phone ?? null,
+        city: appRow.city ?? null,
+        industry: appRow.industry ?? null,
+        lang: appRow.lang ?? null,
+        want_rate_book: appRow.want_rate_book ?? null,
+        cr_number: appRow.cr_number ?? null,
+        vat_number: appRow.vat_number ?? null,
+        cr_path: appRow.cr_path ?? null,
+        vat_path: appRow.vat_path ?? null,
       });
 
       const params = new URLSearchParams();
       params.set("status", "approved");
-      params.set("invite", encodeURIComponent(inviteUrl));
-      if (appRow?.phone) params.set("phone", appRow.phone);
-      if (appRow?.email) params.set("email", appRow.email);
-      redirect(`/admin/partner-applications?${params.toString()}`);
-    } catch (e: any) {
-      const msg = e?.message || "invite_error";
-      const params = new URLSearchParams();
-      params.set("status", "approved");
-      params.set("error", msg);
-      redirect(`/admin/partner-applications?${params.toString()}`);
-    }
-  }
-
-  if (decision === "approved") {
-    try {
-      const { data: appRow, error: aErr } = await supabase
-        .from("partners_applications")
-        .select("company_name, email, phone")
-        .eq("id", id)
-        .single();
-      if (aErr) throw aErr;
-
-      const inviteUrl = await createTenantAndInviteForApp({
-        company_name: appRow?.company_name || "Partner",
-        contact_email: appRow?.email || null,
-        contact_phone: appRow?.phone || null,
-        role: "owner",
-      });
-
-      const params = new URLSearchParams();
-      params.set("status", "approved");
-      params.set("invite", encodeURIComponent(inviteUrl));
-      if (appRow?.phone) params.set("phone", appRow.phone);
-      if (appRow?.email) params.set("email", appRow.email);
+      if (inviteUrl) params.set("invite", encodeURIComponent(inviteUrl));
+      if (appRow.phone) params.set("phone", appRow.phone);
+      if (appRow.email) params.set("email", appRow.email);
       redirect(`/admin/partner-applications?${params.toString()}`);
     } catch (e: any) {
       const msg = e?.message || "invite_error";

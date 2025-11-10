@@ -1,11 +1,58 @@
 // @ts-nocheck
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { supabase } from "@/lib/supabase/client";
-import { Zap, Mail, Lock } from "lucide-react";
+import { useEffect, useMemo, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
+import { createBrowserClient } from "@/lib/supabase/client";
+import { Zap, Mail, Lock, Eye, EyeOff } from "lucide-react";
 import { Kelly_Slab } from "next/font/google";
 const kellySlab = Kelly_Slab({ weight: "400", subsets: ["latin"], display: "swap" });
+// Small helpers for session-availability race
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+async function waitForSession(sb: ReturnType<typeof createBrowserClient>, timeoutMs = 2000) {
+  const start = Date.now();
+  // quick attempt
+  let { data } = await sb.auth.getSession();
+  if (data?.session) return data.session;
+  // subscribe + light polling (covers most cases)
+  const { data: sub } = sb.auth.onAuthStateChange((_evt, session) => {
+    if (session) {
+      // no-op; polling branch will pick it up
+    }
+  });
+  try {
+    while (Date.now() - start < timeoutMs) {
+      await sleep(150);
+      const { data: d2 } = await sb.auth.getSession();
+      if (d2?.session) return d2.session;
+    }
+    return null as any;
+  } finally {
+    try { sub.subscription.unsubscribe(); } catch {}
+  }
+}
+
+function Modal({ open, onClose, title, children, actions }: { open: boolean; onClose: () => void; title: string; children: React.ReactNode; actions?: React.ReactNode }) {
+  if (!open) return null
+  return (
+    <div className="fixed inset-0 z-50">
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+      <div className="absolute inset-0 grid place-items-center p-4">
+        <div className="w-full max-w-md rounded-2xl border border-emerald-200 bg-white dark:bg-neutral-900 shadow-xl">
+          <div className="px-5 pt-4 pb-2">
+            <h3 className="text-lg font-semibold">{title}</h3>
+          </div>
+          <div className="px-5 pb-4 text-sm text-neutral-700 dark:text-neutral-200">
+            {children}
+          </div>
+          <div className="px-5 pb-4 flex items-center justify-end gap-2">
+            {actions}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 function BreathingBolt() {
   return (
@@ -16,88 +63,55 @@ function BreathingBolt() {
   );
 }
 
-type Step = "phone" | "code";
 
 type Lang = "en" | "ar" | "ur" | "hi" | "ml" | "bn";
 
-type Method = "otp" | "password";
 
 // Lightweight i18n (aligned with signup page)
 const i18n: Record<Lang | "zh", any> = {
   en: {
     back: "← Back to website",
     title: "Sign in to VariForce Workspace",
-    subtitle: "Use WhatsApp OTP or Email & Password",
-    waNumber: "WhatsApp number",
-    phonePh: "9665XXXXXXXX",
-    send: "Send code",
-    sending: "Sending…",
-    enterCodeTo: "Enter the 6‑digit code sent to",
-    codePh: "••••••",
-    verify: "Verify & continue",
-    verifying: "Verifying…",
-    resend: "Resend code",
+    subtitle: "Sign in with Email & Password",
     haveNoAccount: "New here? Create an account",
-    codeSent: "Code sent on WhatsApp.",
-    phoneError: "Enter phone in E.164 without + (e.g., 9665XXXXXXXX).",
-    codeError: "Enter the 6‑digit code.",
-    noAccountTitle: "No account found",
-    noAccountBody:
-      "This WhatsApp number is not registered. Please sign up to request access to VariForce Workspace.",
-    goToSignup: "Go to Sign up",
-    cancel: "Cancel",
-    hintPhone: "KSA mobile format: 5XXXXXXXX",
     tagline: "One Team, Many Skills",
     support1: "On‑demand factotum crews.",
     support2:
       "Built for founders starting from zero and SMEs where outsourcing slows growth.",
-    // New keys for email/password tab
-    methodOTP: "WhatsApp OTP",
-    methodPassword: "Email & Password",
     email: "Email",
     password: "Password",
     signIn: "Sign in",
     signingIn: "Signing in…",
     emailRequired: "Enter a valid email.",
     passwordRequired: "Enter your password.",
+    forgotPassword: "Forgot password?",
     loginFailed: "Login failed. Check your email and password.",
+    accountInactiveTitle: "Account not active",
+    accountInactiveBody: "Your account is not active yet. Please contact VariForce support to activate your workspace access.",
+    contactSupport: "Contact support",
+    close: "Close",
   },
   ar: {
     back: "← الرجوع إلى الموقع",
     title: "تسجيل الدخول إلى مساحة عمل VariForce",
-    subtitle: "سجّل عبر رمز واتساب أو البريد وكلمة المرور",
-    waNumber: "رقم الواتساب",
-    phonePh: "9665XXXXXXXX",
-    send: "إرسال الرمز",
-    sending: "جارٍ الإرسال…",
-    enterCodeTo: "أدخل الرمز المكوّن من 6 أرقام المُرسل إلى",
-    codePh: "••••••",
-    verify: "تحقق وتابع",
-    verifying: "جارٍ التحقق…",
-    resend: "إعادة إرسال الرمز",
+    subtitle: "سجّل عبر البريد وكلمة المرور",
     haveNoAccount: "مستخدم جديد؟ أنشئ حسابًا",
-    codeSent: "تم إرسال الرمز عبر واتساب.",
-    phoneError: "أدخل الرقم بصيغة E.164 بدون + (مثال: 9665XXXXXXXX).",
-    codeError: "أدخل الرمز المكوّن من 6 أرقام.",
-    noAccountTitle: "لا يوجد حساب",
-    noAccountBody:
-      "رقم الواتساب هذا غير مسجل. يرجى إنشاء حساب للتقديم على الوصول إلى مساحة عمل VariForce.",
-    goToSignup: "اذهب للتسجيل",
-    cancel: "إلغاء",
-    hintPhone: "تنسيق رقم الجوال السعودي: ‎5XXXXXXXX",
     tagline: "فريق واحد، مهارات متعددة",
     support1: "فرق متعددة المهام عند الطلب.",
     support2:
       "مصمم للمؤسسين من الصفر وللشركات الصغيرة والمتوسطة حيث يبطئ الاستعانة بمصادر خارجية النمو.",
-    methodOTP: "رمز واتساب",
-    methodPassword: "البريد وكلمة المرور",
     email: "البريد الإلكتروني",
     password: "كلمة المرور",
     signIn: "تسجيل الدخول",
     signingIn: "جارٍ الدخول…",
     emailRequired: "أدخل بريدًا صحيحًا.",
     passwordRequired: "أدخل كلمة المرور.",
+    forgotPassword: "نسيت كلمة المرور؟",
     loginFailed: "تعذر تسجيل الدخول. تحقق من البريد وكلمة المرور.",
+    accountInactiveTitle: "الحساب غير مفعل",
+    accountInactiveBody: "حسابك غير مفعل بعد. يرجى التواصل مع دعم VariForce لتفعيل صلاحية الدخول.",
+    contactSupport: "تواصل مع الدعم",
+    close: "إغلاق",
   },
   ur: {},
   hi: {},
@@ -107,8 +121,8 @@ const i18n: Record<Lang | "zh", any> = {
 };
 
 export default function LoginPage() {
-  const [method, setMethod] = useState<Method>("otp");
-  const [step, setStep] = useState<Step>("phone");
+  const router = useRouter();
+  const sb = useMemo(() => createBrowserClient(), []);
   const [lang, setLang] = useState<Lang>("en");
 
   // One-time init: prefer ?lang=
@@ -139,23 +153,170 @@ export default function LoginPage() {
     } catch {}
   }, []);
 
-  // OTP state
-  const [phone, setPhone] = useState("");
-  const [code, setCode] = useState("");
-  const [resendTimer, setResendTimer] = useState(0);
-  const [phoneErr, setPhoneErr] = useState<string | null>(null);
-  const phoneNational = (phone || "").replace(/^966/, "");
-  const phoneValid = /^5\d{8}$/.test(phoneNational);
 
   // Email/Password state
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
 
   // Shared state
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [showSignupModal, setShowSignupModal] = useState(false);
+  const [noMembershipOpen, setNoMembershipOpen] = useState(false);
+  // Auth UI guards
+  const [bootChecked, setBootChecked] = useState(false);
+  const [authed, setAuthed] = useState(false);
+  const [attempted, setAttempted] = useState(false); // set true when user presses Sign In
+
+  const resolveAndRoute = useCallback(
+    async (fromAttempt: boolean = false, retries: number = 5) => {
+      try {
+        const { data: u } = await sb.auth.getUser();
+        const user = u?.user;
+        if (!user) return;
+
+        // Prefer default tenant from metadata
+        let tenantId: string | null =
+          (user?.user_metadata as any)?.default_tenant_id ??
+          (user?.user_metadata as any)?.default_tenant ??
+          null;
+
+        // Fallback: oldest ACTIVE membership
+        if (!tenantId) {
+          const { data: memberships, error: mErr } = await sb
+            .from("members")
+            .select("tenant_id, status, created_at")
+            .eq("user_id", user.id)
+            .eq("status", "active")
+            .order("created_at", { ascending: true })
+            .limit(1);
+
+          if (mErr) console.warn("[login] members lookup RLS error:", mErr);
+          if (memberships?.length) tenantId = memberships[0].tenant_id as string | null;
+        }
+
+        // If still nothing, retry a few times to let the new JWT propagate
+        if (!tenantId && retries > 0) {
+          await sleep(220);
+          return resolveAndRoute(fromAttempt, retries - 1);
+        }
+
+        if (!tenantId) {
+          if (fromAttempt) {
+            setErr("No tenant membership found for this account. If you were just provisioned, refresh and try again.");
+            setNoMembershipOpen(true);
+          }
+          return;
+        }
+
+        // Read tenant status (RLS-enabled). If blocked, send to activation.
+        const { data: t, error: tErr } = await sb
+          .from("tenants")
+          .select("id,status")
+          .eq("id", tenantId)
+          .maybeSingle();
+
+        try {
+          localStorage.setItem("vf_tenant", tenantId);
+          document.cookie = `vf_tenant=${encodeURIComponent(tenantId)}; Path=/; Max-Age=${60 * 60 * 24 * 30}; SameSite=Lax`;
+        } catch {}
+
+        if (tErr || !t || t.status === "pending") {
+          router.replace(`/portal/${tenantId}/activation`);
+          return;
+        }
+        router.replace(`/portal/${tenantId}/dashboard`);
+      } catch (err) {
+        console.warn("[login] resolveAndRoute failed", err);
+      }
+    },
+    [sb, setNoMembershipOpen, router]
+  );
+
+  // On mount, if already signed in, resolve and route
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const { data } = await sb.auth.getUser();
+        if (!alive) return;
+        const isAuthed = !!data?.user;
+        setAuthed(isAuthed);
+        setBootChecked(true);
+        if (isAuthed) {
+          await resolveAndRoute(false, 3);
+        }
+      } catch {
+        setBootChecked(true);
+      }
+    })();
+    return () => { alive = false; };
+  }, [resolveAndRoute]);
+
+  async function routeAfterAuth(accessToken: string) {
+    // Resolve membership and route accordingly (no admin redirect here)
+    try {
+      const { data: u } = await sb.auth.getUser();
+      const user = u?.user;
+      if (!user) return;
+
+      // Prefer default tenant from auth metadata
+      let tenantId: string | null =
+        (user?.user_metadata as any)?.default_tenant_id ??
+        (user?.user_metadata as any)?.default_tenant ??
+        null;
+
+      // Fallback: earliest active membership
+      if (!tenantId && user?.id) {
+        const { data: memberships, error: mErr } = await sb
+          .from("members")
+          .select("tenant_id, status, created_at")
+          .eq("user_id", user.id)
+          .eq("status", "active")
+          .order("created_at", { ascending: true });
+
+        console.log("[login] memberships RLS data:", memberships, "error:", mErr);
+
+        if (mErr) {
+          console.warn("[login] members lookup RLS error:", mErr);
+        }
+
+        if (memberships && memberships.length > 0) {
+          tenantId = memberships[0].tenant_id as string | null;
+        }
+      }
+
+      // This portal is for tenant users only; BOCC staff must use /admin/login
+      if (!tenantId) {
+        setErr("This portal is for customers/tenants. BOCC staff should sign in at /admin/login.");
+        try { await sb.auth.signOut(); } catch {}
+        return;
+      }
+
+      // Read tenant status via RLS and route to activation if pending
+      const { data: t, error: tErr } = await sb
+        .from("tenants")
+        .select("id, status")
+        .eq("id", tenantId)
+        .maybeSingle();
+
+      // Persist tenant hint for subsequent navigation
+      try { localStorage.setItem("vf_tenant", tenantId); } catch {}
+      document.cookie = `vf_tenant=${encodeURIComponent(tenantId)}; Path=/; Max-Age=${60 * 60 * 24 * 30}; SameSite=Lax`;
+
+      if (tErr || !t || t.status === "pending") {
+        router.replace(`/portal/${tenantId}/activation`);
+        return;
+      }
+
+      // Default route for active tenants
+      router.replace(`/portal/${tenantId}/dashboard`);
+    } catch (routeErr) {
+      console.warn("routeAfterAuth failed:", routeErr);
+      router.replace("/portal");
+    }
+  }
 
   const t = (k: keyof typeof i18n["en"]) => (i18n[lang] as any)[k] ?? (i18n.en as any)[k] ?? k;
   const isRTL = lang === "ar" || lang === "ur";
@@ -163,133 +324,11 @@ export default function LoginPage() {
   const cardOrderCls = isRTL ? "md:order-1" : "md:order-2";
   const partnerUrl = useMemo(() => `https://bocc.sa/partners?lang=${lang}`, [lang]);
 
-  useEffect(() => {
-    if (resendTimer <= 0) return;
-    const tm = setInterval(() => setResendTimer((s) => Math.max(0, s - 1)), 1000);
-    return () => clearInterval(tm);
-  }, [resendTimer]);
-
-  async function sendOTP() {
-    setErr(null);
-    setMsg(null);
-
-    let normalized = (phone || "").replace(/\D/g, "");
-    if (normalized.startsWith("05")) normalized = normalized.slice(1);
-    normalized = normalized.replace(/^0+/, "");
-    if (!normalized.startsWith("966")) normalized = "966" + normalized;
-
-    if (!/^9665\d{8}$/.test(normalized)) {
-      setErr("Phone must start with 5 and be 9 digits long.");
-      return;
-    }
-
-    setLoading(true);
-    try {
-      try {
-        if (supabase) {
-          const { data, error } = await supabase.from("profiles").select("status").eq("phone", normalized).single();
-          if (error && error.code && error.code !== "PGRST116") {
-            console.warn("profiles precheck warning:", error);
-          } else if (data) {
-            if (data.status === "pending") {
-              setErr("Your account is under review. You’ll receive access once approved.");
-              setLoading(false);
-              return;
-            }
-            if (data.status === "rejected") {
-              setErr("Your application was not approved. Contact support if you believe this is a mistake.");
-              setLoading(false);
-              return;
-            }
-          }
-        }
-      } catch (preErr) {
-        console.warn("profiles precheck failed, continuing:", preErr);
-      }
-
-      const r = await fetch(`/api/wa/send-otp?lang=${encodeURIComponent(lang)}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: normalized }),
-      });
-
-      let j: any = null;
-      try {
-        j = await r.json();
-      } catch {}
-
-      if (!r.ok) {
-        if (r.status === 404) setErr("OTP service not found. Ensure /app/api/wa/send-otp/route.ts exists and rebuild.");
-        else if (r.status === 401 || r.status === 403) setErr("OTP service unauthorized. Check META_WHATSAPP_TOKEN envs.");
-        else setErr(j?.message || j?.error || `Failed to send code (HTTP ${r.status}).`);
-        setLoading(false);
-        return;
-      }
-
-      const resendIn = j && typeof j.resend_in === "number" ? j.resend_in : 60;
-      setMsg(t("codeSent"));
-      setStep("code");
-      setResendTimer(resendIn);
-      setPhone(normalized.replace(/^966/, ""));
-    } catch (e: any) {
-      console.error("sendOTP exception:", e);
-      setErr(e?.message || "Failed to send code");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function verifyOTP() {
-    setErr(null);
-    setMsg(null);
-    const c = (code || "").replace(/\D/g, "").slice(0, 6);
-    if (!/^\d{6}$/.test(c)) {
-      setErr(t("codeError"));
-      return;
-    }
-    let normalized = (phone || "").replace(/\D/g, "");
-    if (normalized.startsWith("05")) normalized = normalized.slice(1);
-    normalized = normalized.replace(/^0+/, "");
-    if (!normalized.startsWith("966")) normalized = "966" + normalized;
-    if (!/^9665\d{8}$/.test(normalized)) {
-      setErr("Phone must start with 5 and be 9 digits long.");
-      return;
-    }
-    setLoading(true);
-    try {
-      const r = await fetch("/api/wa/verify-otp", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: normalized, code: c }),
-      });
-      const j = await r.json();
-      if (!r.ok) throw new Error(j?.message || j?.error || "Invalid code");
-
-      // Gate by profiles table if present
-      const sb = supabase;
-      if (sb) {
-        const { data, error } = await sb.from("profiles").select("status").eq("phone", normalized).maybeSingle();
-        if (error) throw new Error(error.message);
-        if (!data) {
-          setShowSignupModal(true);
-          setLoading(false);
-          return;
-        }
-        if (data.status === "pending") throw new Error("Your account is under review.");
-        if (data.status === "rejected") throw new Error("Your application was not approved. Contact support.");
-      }
-      window.location.href = "/portal/create-project";
-    } catch (e: any) {
-      setErr(e.message || "Verification failed");
-    } finally {
-      setLoading(false);
-    }
-  }
-
   async function loginWithEmailPass() {
     setErr(null);
     setMsg(null);
-    if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+    setAttempted(true);
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       setErr(t("emailRequired"));
       return;
     }
@@ -299,48 +338,20 @@ export default function LoginPage() {
     }
     setLoading(true);
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      const { data, error } = await sb.auth.signInWithPassword({ email, password });
       if (error || !data?.session) throw new Error(error?.message || t("loginFailed"));
 
-      // TEMP: set vf_session on client so middleware allows /portal/* (replace with server route later)
+      // Optional cookie for other parts of app
       try {
-        const token = data.session.access_token || "vf";
-        document.cookie = `vf_session=${encodeURIComponent(token)}; Path=/; Max-Age=${60 * 60 * 24 * 7}; SameSite=Lax`;
+        document.cookie = `vf_session=${encodeURIComponent(data.session.access_token)}; Path=/; Max-Age=${60 * 60 * 24 * 7}; SameSite=Lax`;
       } catch {}
 
-      // Determine tenant and route to /portal/{tenantId}/dashboard when available
-      try {
-        const user = data.user; // supabase-js v2 returns { data: { user, session } }
-        let tenantId: string | null = (user?.user_metadata as any)?.default_tenant_id ?? null;
-
-        if (!tenantId) {
-          const { data: memberships, error: mErr } = await supabase
-            .from("tenant_members")
-            .select("tenant_id, role, created_at")
-            .order("created_at", { ascending: true });
-
-          if (mErr) {
-            console.warn("tenant_members lookup warning:", mErr);
-          } else if (memberships && memberships.length > 0) {
-            tenantId = memberships[0].tenant_id as string;
-          }
-        }
-
-        // Persist chosen tenant locally for the app shell
-        if (tenantId) {
-          try { localStorage.setItem("vf_tenant", tenantId); } catch {}
-          document.cookie = `vf_tenant=${encodeURIComponent(tenantId)}; Path=/; Max-Age=${60 * 60 * 24 * 30}; SameSite=Lax`;
-          window.location.href = `/portal/${tenantId}/dashboard`;
-        } else {
-          // Fallback if no membership yet
-          window.location.href = "/portal/create-project";
-        }
-      } catch (routeErr) {
-        console.warn("post-login routing issue:", routeErr);
-        window.location.href = "/portal/create-project";
-      }
+      setMsg("Sign-in successful. Redirecting…");
+      // Ensure fresh JWT/session is attached before RLS queries
+      await waitForSession(sb, 2000);
+      await resolveAndRoute(true /* fromAttempt */, 5);
     } catch (e: any) {
-      setErr(e.message || t("loginFailed"));
+      setErr(e?.message || t("loginFailed"));
     } finally {
       setLoading(false);
     }
@@ -349,7 +360,15 @@ export default function LoginPage() {
   return (
     <div className="relative flex flex-col min-h-screen overflow-x-hidden overflow-y-hidden" dir={dir} data-lang={lang} suppressHydrationWarning>
       {/* Background */}
-      <video className="pointer-events-none fixed inset-0 w-full h-full object-cover z-0" src="/bg/fieldwork.mp4" autoPlay muted loop playsInline />
+      <video
+        className="pointer-events-none fixed inset-0 w-full h-full object-cover z-0"
+        src="/bg/fieldwork.mp4"
+        autoPlay
+        muted
+        loop
+        playsInline
+        onError={(e) => { try { (e.currentTarget as HTMLVideoElement).style.display = 'none'; } catch {} }}
+      />
       <div className="fixed inset-0 z-0 bg-emerald-50/80" />
       <div className="fixed inset-0 z-0 bg-[radial-gradient(60%_40%_at_20%_20%,rgba(16,185,129,0.12),transparent),radial-gradient(50%_40%_at_80%_0%,rgba(6,182,212,0.12),transparent)]" />
 
@@ -399,7 +418,7 @@ export default function LoginPage() {
           {/* Left: hero branding */}
           <section className="hidden md:flex flex-col justify-center items-end text-right w-full">
             <h1 className="mt-0">
-              <span className={`${kellySlab.className} relative inline-block tracking-tight text-6xl sm:text-7xl md:text-8xl lg:text-9xl text-slate-900`}>
+              <span className={`${kellySlab.className} relative inline-block tracking-tight text-6xl sm:text-7xl md:text-8xl lg:text-9xl text-slate-900 pb-4`}>
                 <span className="pointer-events-none absolute -inset-8 -z-10 blur-3xl bg-[radial-gradient(closest-side,rgba(16,185,129,0.25),transparent_78%)] glow-breathe" />
                 <span className="inline-flex items-baseline gap-0.5">
                   <span>VariForce</span>
@@ -422,211 +441,129 @@ export default function LoginPage() {
                 <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_10%,rgba(16,185,129,0.08),transparent_30%),radial-gradient(circle_at_80%_20%,rgba(6,182,212,0.08),transparent_32%)]" />
                 <div className="relative z-10 p-4 sm:p-5 mx-auto w-full">
                   <a href={partnerUrl} className="mb-2 inline-flex items-center text-sm text-emerald-700 hover:text-emerald-900">{t("back")}</a>
-                  <h1 className="text-xl sm:text-2xl font-semibold text-gray-900">{t("title")}</h1>
+                  <h1 className="text-xl sm:text-2xl font-semibold text-gray-900">
+                    {lang === "ar" ? (
+                      <span className="relative inline-block">
+                        {i18n.ar.title.split("VariForce")[0]}
+                        <span className={`${kellySlab.className} tracking-tight mx-1 text-slate-900 relative inline-block`}>
+                          VariForce
+                          <span className="pointer-events-none absolute -top-2 -left-3">
+                            <Zap className="w-4 h-4 text-emerald-500 bolt-breathe" />
+                          </span>
+                        </span>
+                      </span>
+                    ) : (
+                      <span className="relative inline-block">
+                        {"Sign in to "}
+                        <span className={`${kellySlab.className} tracking-tight mx-1 text-slate-900 relative inline-block`}>
+                          VariForce
+                          <span className="pointer-events-none absolute -top-2 -right-3">
+                            <Zap className="w-4 h-4 text-emerald-500 bolt-breathe" />
+                          </span>
+                        </span>
+                        {" Workspace"}
+                      </span>
+                    )}
+                  </h1>
                   <p className="text-sm text-gray-700 max-w-2xl mt-1">{t("subtitle")}</p>
 
-                  {/* Method tabs */}
-                  <div className="mt-4 inline-flex rounded-full border border-emerald-200 bg-white/80 backdrop-blur p-1">
-                    <button
-                      className={`px-3 py-1.5 text-sm rounded-full transition ${
-                        method === "otp" ? "bg-emerald-600 text-white shadow" : "text-emerald-700 hover:bg-emerald-50"
-                      }`}
-                      onClick={() => setMethod("otp")}
-                    >
-                      {t("methodOTP")}
-                    </button>
-                    <button
-                      className={`px-3 py-1.5 text-sm rounded-full transition ${
-                        method === "password" ? "bg-emerald-600 text-white shadow" : "text-emerald-700 hover:bg-emerald-50"
-                      }`}
-                      onClick={() => setMethod("password")}
-                    >
-                      {t("methodPassword")}
-                    </button>
-                  </div>
+                  {/* Title for email/password login */}
+                  <div className="mt-4 text-lg font-semibold text-emerald-800">{t("subtitle")}</div>
 
                   {/* Flash messages */}
                   {msg && <div className="mt-4 rounded bg-green-50 text-green-700 text-sm px-3 py-2">{msg}</div>}
-                  {err && <div className="mt-4 rounded bg-red-50 text-red-700 text-sm px-3 py-2">{err}</div>}
+                  {bootChecked && err && <div className="mt-4 rounded bg-red-50 text-red-700 text-sm px-3 py-2">{err}</div>}
+                  {bootChecked && err && (
+                    <div className="mt-2 text-[11px] text-slate-500">
+                      (Tip: ensure there is an <code>active</code> row in <code>public.members</code> with this <code>user_id</code> and a valid <code>tenant_id</code>.)
+                    </div>
+                  )}
 
                   {/* Forms */}
                   <div className="mt-4">
-                    {method === "otp" ? (
-                      step === "phone" ? (
-                        <div>
-                          <label className="block text-sm text-gray-700 mb-1">{t("waNumber")}</label>
-                          <div className="relative">
-                            <span className="absolute inset-y-0 left-3 grid place-items-center">
-                              <img src="/whatsapp.svg" alt="WhatsApp" className="h-5 w-5 tint-emerald-600" />
-                            </span>
-                            <span className="absolute inset-y-0 left-9 flex items-center">
-                              <span className="text-emerald-700 text-sm font-medium select-none">+966</span>
-                            </span>
-                            <input
-                              value={(phone || "").replace(/^966/, "")}
-                              onChange={(e) => {
-                                let v = (e.target.value || "").replace(/\D/g, "");
-                                if (v.startsWith("05")) v = v.slice(1);
-                                v = v.replace(/^0+/, "");
-                                if (v.length > 9) v = v.slice(0, 9);
-                                if (v.length > 0 && v[0] !== "5") {
-                                  setPhoneErr("Number must start with 5");
-                                } else {
-                                  setPhoneErr(null);
-                                }
-                                setPhone(v);
-                              }}
-                              placeholder="5XXXXXXXX"
-                              className="w-full border rounded px-3 pl-20 py-2 outline-none border-emerald-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-                              inputMode="numeric"
-                              maxLength={9}
-                              dir="ltr"
-                              aria-invalid={!!phoneErr || !phoneValid}
-                              aria-describedby="phone-hint"
-                              onKeyDown={(ev) => {
-                                if (ev.key === "Enter" && phoneValid && !loading) {
-                                  sendOTP();
-                                }
-                              }}
-                            />
-                          </div>
-                          {phoneErr && <div className="mt-1 text-xs text-red-600">{phoneErr}</div>}
-                          {!phoneErr && (
-                            <div id="phone-hint" className="mt-1 text-xs text-gray-500">
-                              {t("hintPhone")}
-                            </div>
-                          )}
-                          <button
-                            onClick={sendOTP}
-                            disabled={loading || !phoneValid}
-                            aria-disabled={loading || !phoneValid}
-                            className="mt-3 w-full h-11 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-sm transition-colors disabled:opacity-100 disabled:brightness-95 disabled:saturate-90 disabled:cursor-not-allowed"
-                            title={!phoneValid ? t("hintPhone") : undefined}
-                          >
-                            {loading ? t("sending") : t("send")}
-                          </button>
-                          <p className="mt-3 text-sm text-gray-700">
-                            <a href="/portal/signup" className="underline hover:text-emerald-700">
-                              {t("haveNoAccount")}
-                            </a>
-                          </p>
-                        </div>
-                      ) : (
-                        <div>
-                          <div className="text-sm text-gray-700 mb-2">
-                            {t("enterCodeTo")} <span className="font-medium">{phone}</span>
-                          </div>
-                          <input
-                            value={code}
-                            onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                            placeholder={t("codePh")}
-                            className="tracking-widest text-center text-lg w-full border rounded px-3 py-2 outline-none border-gray-300 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-                            inputMode="numeric"
-                            maxLength={6}
-                            onKeyDown={(ev) => {
-                              if (ev.key === "Enter" && !loading) {
-                                verifyOTP();
-                              }
-                            }}
-                          />
-                          <button
-                            onClick={verifyOTP}
-                            disabled={loading}
-                            className="mt-3 w-full h-11 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-sm transition-colors disabled:opacity-100 disabled:brightness-95 disabled:saturate-90 disabled:cursor-not-allowed"
-                          >
-                            {loading ? t("verifying") : t("verify")}
-                          </button>
-                          <div className="mt-3 flex items-center justify-between text-sm text-gray-700">
-                            <button className="underline disabled:no-underline disabled:opacity-50" onClick={sendOTP} disabled={resendTimer > 0 || loading}>
-                              {t("resend")} {resendTimer > 0 ? `(${resendTimer}s)` : ""}
-                            </button>
-                            <a href="/portal/signup" className="underline hover:text-emerald-700">
-                              {t("haveNoAccount")}
-                            </a>
-                          </div>
-                        </div>
-                      )
-                    ) : (
-                      // Email & Password method
-                      <div>
-                        <label className="block text-sm text-gray-700 mb-1">{t("email")}</label>
-                        <div className="relative">
-                          <span className="absolute inset-y-0 left-3 grid place-items-center">
-                            <Mail className="h-4 w-4 text-emerald-700" />
-                          </span>
-                          <input
-                            type="email"
-                            value={email}
-                            onChange={(e) => setEmail(e.target.value)}
-                            placeholder="you@example.com"
-                            className="w-full border rounded px-3 pl-10 py-2 outline-none border-emerald-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-                            dir="ltr"
-                            onKeyDown={(ev) => {
-                              if (ev.key === "Enter" && !loading) loginWithEmailPass();
-                            }}
-                          />
-                        </div>
-                        <label className="block text-sm text-gray-700 mb-1 mt-3">{t("password")}</label>
-                        <div className="relative">
-                          <span className="absolute inset-y-0 left-3 grid place-items-center">
-                            <Lock className="h-4 w-4 text-emerald-700" />
-                          </span>
-                          <input
-                            type="password"
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                            placeholder="••••••••"
-                            className="w-full border rounded px-3 pl-10 py-2 outline-none border-emerald-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-                            dir="ltr"
-                            onKeyDown={(ev) => {
-                              if (ev.key === "Enter" && !loading) loginWithEmailPass();
-                            }}
-                          />
-                        </div>
-                        <button
-                          onClick={loginWithEmailPass}
-                          disabled={loading}
-                          className="mt-4 w-full h-11 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-sm transition-colors disabled:opacity-100 disabled:brightness-95 disabled:saturate-90 disabled:cursor-not-allowed"
-                        >
-                          {loading ? t("signingIn") : t("signIn")}
-                        </button>
-                        <p className="mt-3 text-sm text-gray-700">
-                          <a href="/portal/signup" className="underline hover:text-emerald-700">
-                            {t("haveNoAccount")}
-                          </a>
-                        </p>
+                    <div>
+                      <label className="block text-sm text-gray-700 mb-1">{t("email")}</label>
+                      <div className="relative">
+                        <span className="absolute inset-y-0 left-3 grid place-items-center">
+                          <Mail className="h-4 w-4 text-emerald-700" />
+                        </span>
+                        <input
+                          type="email"
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                          placeholder="you@example.com"
+                          className="w-full border rounded px-3 pl-10 py-2 outline-none border-emerald-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                          dir="ltr"
+                          onKeyDown={(ev) => {
+                            if (ev.key === "Enter" && !loading) loginWithEmailPass();
+                          }}
+                        />
                       </div>
-                    )}
+                      <label className="block text-sm text-gray-700 mb-1 mt-3">{t("password")}</label>
+                      <div className="relative">
+                        <span className="absolute inset-y-0 left-3 grid place-items-center">
+                          <Lock className="h-4 w-4 text-emerald-700" />
+                        </span>
+                        <input
+                          type={showPassword ? "text" : "password"}
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                          placeholder="••••••••"
+                          className="w-full border rounded px-3 pl-10 pr-10 py-2 outline-none border-emerald-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                          dir="ltr"
+                          onKeyDown={(ev) => {
+                            if (ev.key === "Enter" && !loading) loginWithEmailPass();
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword((s) => !s)}
+                          aria-label={showPassword ? "Hide password" : "Show password"}
+                          className="absolute inset-y-0 right-2 grid place-items-center px-2 text-emerald-700 hover:text-emerald-900 focus:outline-none"
+                        >
+                          {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        </button>
+                      </div>
+                      <div className="mt-2 text-right">
+                        <a
+                          href={`mailto:info@bocc.sa?subject=${encodeURIComponent('Forgot Password — VariForce')}&body=${encodeURIComponent('Hello BOCC Team,%0D%0A%0D%0AI cannot access my VariForce account.%0D%0AEmail: ' + (email || '') + '%0D%0ATenant/Company (if known): %0D%0APhone (optional): %0D%0A%0D%0AThank you!')}`}
+                          className="text-sm text-emerald-700 hover:text-emerald-900 underline underline-offset-4"
+                        >
+                          {t("forgotPassword")}
+                        </a>
+                      </div>
+                      <button
+                        onClick={loginWithEmailPass}
+                        disabled={loading}
+                        className="mt-4 w-full h-11 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-sm transition-colors disabled:opacity-100 disabled:brightness-95 disabled:saturate-90 disabled:cursor-not-allowed"
+                      >
+                        {loading ? t("signingIn") : t("signIn")}
+                      </button>
+                      {msg && (
+                        <div className="mt-2 text-right">
+                          <a
+                            href="/portal"
+                            className="text-sm text-emerald-700 hover:text-emerald-900 underline underline-offset-4"
+                          >
+                            Go to dashboard
+                          </a>
+                        </div>
+                      )}
+                      <p className="mt-3 text-sm text-gray-700">
+                        <a href="/portal/signup" className="underline hover:text-emerald-700">
+                          {t("haveNoAccount")}
+                        </a>
+                      </p>
+                    </div>
                   </div>
                 </div>
-              </div>
+              </div> 
             </div>
           </section>
         </div>
       </main>
 
-      {/* Global Signup Modal */}
-      {showSignupModal && (
-        <>
-          <div className="fixed inset-0 z-[100] bg-black/50 backdrop-blur-[2px]" onClick={() => setShowSignupModal(false)} />
-          <div className="fixed inset-0 z-[110] flex items-center justify-center px-4 min-h-screen">
-            <div role="dialog" aria-modal="true" aria-labelledby="signup-modal-title" className="w-full max-w-md rounded-xl border border-gray-200 bg-white shadow-2xl">
-              <div className="px-5 py-4 border-b">
-                <h2 id="signup-modal-title" className="text-lg font-semibold text-gray-900">{t("noAccountTitle")}</h2>
-              </div>
-              <div className="px-5 py-4 text-gray-700 text-sm">{t("noAccountBody")}</div>
-              <div className="px-5 py-4 flex items-center justify-end gap-2 border-t">
-                <button type="button" onClick={() => setShowSignupModal(false)} className="rounded-md px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
-                  {t("cancel")}
-                </button>
-                <a href="/portal/signup" className="inline-flex items-center justify-center rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-sm px-4 py-2">
-                  {t("goToSignup")}
-                </a>
-              </div>
-            </div>
-          </div>
-        </>
-      )}
+
 
       {/* Footer */}
       <footer className="absolute bottom-0 w-full z-10 border-t border-white/20 bg-black/40 backdrop-blur-sm text-gray-200">
@@ -652,6 +589,28 @@ export default function LoginPage() {
         </div>
       </footer>
 
+      {/* No membership modal */}
+      <Modal
+        open={(attempted || authed) && noMembershipOpen}
+        onClose={() => setNoMembershipOpen(false)}
+        title={t("accountInactiveTitle")}
+      >
+        <p>{t("accountInactiveBody")}</p>
+        <div className="mt-4 flex items-center justify-end gap-2">
+          <a
+            href="mailto:info@bocc.sa?subject=Activate%20my%20VariForce%20account"
+            className="rounded-md bg-emerald-600 text-white px-3 py-1.5 text-sm"
+          >
+            {t("contactSupport")}
+          </a>
+          <button
+            onClick={() => setNoMembershipOpen(false)}
+            className="rounded-md border px-3 py-1.5 text-sm"
+          >
+            {t("close")}
+          </button>
+        </div>
+      </Modal>
     </div>
   );
 }

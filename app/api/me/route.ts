@@ -1,18 +1,39 @@
-export const runtime = "nodejs";
-import { NextResponse } from "next/server";
-import { jwtVerify } from "jose";
+import { NextResponse } from 'next/server'
+import { createServiceClient } from '@/lib/supabase/server'
 
 export async function GET(req: Request) {
-  const cookie = (req as any).headers.get("cookie") || "";
-  const match = cookie.match(/bocc_session=([^;]+)/);
-  if (!match) return NextResponse.json({ authed: false });
-  const token = decodeURIComponent(match[1]);
-
   try {
-    const key = new TextEncoder().encode(process.env.AUTH_SECRET || "");
-    const { payload } = await jwtVerify(token, key);
-    return NextResponse.json({ authed: true, phone: payload.sub });
-  } catch {
-    return NextResponse.json({ authed: false });
+    // Expect "Authorization: Bearer <access_token>" from the client
+    const auth = req.headers.get('authorization') || ''
+    const token = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7) : null
+    if (!token) return NextResponse.json({ error: 'missing bearer token' }, { status: 401 })
+
+    const admin = createServiceClient()
+    const { data: userData, error: uErr } = await admin.auth.getUser(token)
+    if (uErr || !userData.user) return NextResponse.json({ error: 'invalid token' }, { status: 401 })
+
+    const userId = userData.user.id
+    const { data: members, error: mErr } = await admin
+      .from('members')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: true })
+      .limit(1)
+
+    if (mErr) return NextResponse.json({ error: mErr.message }, { status: 500 })
+
+    const member = members?.[0] ?? null
+    const tenantId = member?.tenant_id ?? null
+    const isInternal = member?.tenant_id === null
+
+    return NextResponse.json({
+      ok: true,
+      user: { id: userId, email: userData.user.email },
+      member,
+      tenantId,
+      isInternal
+    })
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message ?? 'unexpected' }, { status: 500 })
   }
 }

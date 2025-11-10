@@ -99,10 +99,20 @@ function LocalThemeToggle() {
 
 const NAV: { href: string; label: string }[] = [
   { href: "/admin/dashboard", label: "Dashboard" },
+  { href: "/admin/companies", label: "Companies" },
+  { href: "/admin/members", label: "Members" },
   { href: "/admin/partner-applications", label: "Partner Applications" },
-  { href: "/admin/clients", label: "Clients" },
+  { href: "/admin/workforce", label: "Workforce" },
   { href: "/admin/projects", label: "Projects" },
-  { href: "/admin/quotes", label: "Quotes" },
+  { href: "/admin/estimates", label: "Estimates" },
+  { href: "/admin/invoices-payments", label: "Invoices & Payments" },
+  { href: "/admin/rate-books", label: "Rate Books" },
+  { href: "/admin/catalogs", label: "Catalogs" },
+  { href: "/admin/vendors", label: "Vendors & Marketplace" },
+  { href: "/admin/support", label: "Support" },
+  { href: "/admin/content", label: "Content" },
+  { href: "/admin/calls-log", label: "Calls Log" },
+  { href: "/admin/audit-log", label: "Audit Log" },
   { href: "/admin/settings", label: "Settings" },
 ];
 
