@@ -27,6 +27,25 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
+import type { LucideIcon } from "lucide-react";
+import {
+  LayoutDashboard,
+  Building2,
+  Users,
+  Handshake,
+  Wrench,
+  FolderKanban,
+  FileSpreadsheet,
+  Receipt,
+  BookText,
+  Boxes,
+  Store,
+  LifeBuoy,
+  FileText,
+  PhoneCall,
+  ScrollText,
+  Settings as SettingsIcon,
+} from "lucide-react";
 // --- Local theme toggle (no dependency on next-themes) ---
 function applyThemeClass(theme: "light" | "dark") {
   try {
@@ -97,27 +116,31 @@ function LocalThemeToggle() {
 }
 // --- End local theme toggle ---
 
-const NAV: { href: string; label: string }[] = [
-  { href: "/admin/dashboard", label: "Dashboard" },
-  { href: "/admin/companies", label: "Companies" },
-  { href: "/admin/members", label: "Members" },
-  { href: "/admin/partner-applications", label: "Partner Applications" },
-  { href: "/admin/workforce", label: "Workforce" },
-  { href: "/admin/projects", label: "Projects" },
-  { href: "/admin/estimates", label: "Estimates" },
-  { href: "/admin/invoices-payments", label: "Invoices & Payments" },
-  { href: "/admin/rate-books", label: "Rate Books" },
-  { href: "/admin/catalogs", label: "Catalogs" },
-  { href: "/admin/vendors", label: "Vendors & Marketplace" },
-  { href: "/admin/support", label: "Support" },
-  { href: "/admin/content", label: "Content" },
-  { href: "/admin/calls-log", label: "Calls Log" },
-  { href: "/admin/audit-log", label: "Audit Log" },
-  { href: "/admin/settings", label: "Settings" },
+const NAV: { href: string; label: string; icon: LucideIcon }[] = [
+  { href: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/admin/companies", label: "Companies", icon: Building2 },
+  { href: "/admin/members", label: "Members", icon: Users },
+  { href: "/admin/partner-applications", label: "Partner Applications", icon: Handshake },
+  { href: "/admin/workforce", label: "Workforce", icon: Wrench },
+  { href: "/admin/projects", label: "Projects", icon: FolderKanban },
+  { href: "/admin/estimates", label: "Estimates", icon: FileSpreadsheet },
+  { href: "/admin/invoices-payments", label: "Invoices & Payments", icon: Receipt },
+  { href: "/admin/rate-books", label: "Rate Books", icon: BookText },
+  { href: "/admin/catalogs", label: "Catalogs", icon: Boxes },
+  { href: "/admin/vendors", label: "Vendors & Marketplace", icon: Store },
+  { href: "/admin/support", label: "Support", icon: LifeBuoy },
+  { href: "/admin/content", label: "Content", icon: FileText },
+  { href: "/admin/calls-log", label: "Calls Log", icon: PhoneCall },
+  { href: "/admin/audit-log", label: "Audit Log", icon: ScrollText },
+  { href: "/admin/settings", label: "Settings", icon: SettingsIcon },
 ];
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+
+  const React = require("react") as typeof import("react");
+  const [mounted, setMounted] = React.useState(false);
+  React.useEffect(() => setMounted(true), []);
 
   // Don't wrap the login page at /admin in the admin shell.
   if (pathname === "/admin") return <>{children}</>;
@@ -155,8 +178,11 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                   variant={active ? "secondary" : "ghost"}
                   className="w-full justify-between rounded-full"
                 >
-                  <Link href={item.href}>
-                    <span>{item.label}</span>
+                  <Link href={item.href} className="flex w-full items-center justify-between">
+                    <span className="inline-flex items-center gap-2">
+                      <item.icon className="h-4 w-4" aria-hidden />
+                      {item.label}
+                    </span>
                     {active && <span className="ml-2 h-2 w-2 rounded-full bg-emerald-500" />}
                   </Link>
                 </Button>
@@ -169,41 +195,46 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
         {/* Main column */}
         <div className="min-h-dvh flex flex-col">
           {/* Header */}
-          <header className="sticky top-0 z-40 border-b bg-background/80 backdrop-blur">
+          <header className="sticky top-0 z-40 border-b bg-background/80 backdrop-blur" suppressHydrationWarning>
             <div className="flex h-14 items-center gap-2 px-3">
               {/* Mobile: open sidebar */}
-              <Sheet>
-                <SheetTrigger asChild className="lg:hidden">
-                  <Button variant="outline" size="icon" aria-label="Open menu">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
-                  </Button>
-                </SheetTrigger>
-                <SheetContent side="left" className="p-0 w-[240px]">
-                  <div className="flex items-center gap-3 p-4">
-                    <Image src="/logo.png" alt="BOCC" width={28} height={28} className="rounded-full" />
-                    <div className="text-sm font-extrabold tracking-tight">VariForce Admin</div>
-                  </div>
-                  <Separator />
-                  <nav className="p-3 space-y-1">
-                    {NAV.map((item) => {
-                      const active = pathname === item.href || pathname.startsWith(item.href + "/");
-                      return (
-                        <Button
-                          key={item.href}
-                          asChild
-                          variant={active ? "secondary" : "ghost"}
-                          className="w-full justify-between rounded-full"
-                        >
-                          <Link href={item.href}>
-                            <span>{item.label}</span>
-                            {active && <span className="ml-2 h-2 w-2 rounded-full bg-emerald-500" />}
-                          </Link>
-                        </Button>
-                      );
-                    })}
-                  </nav>
-                </SheetContent>
-              </Sheet>
+              {mounted && (
+                <Sheet>
+                  <SheetTrigger asChild className="lg:hidden">
+                    <Button variant="outline" size="icon" aria-label="Open menu">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+                    </Button>
+                  </SheetTrigger>
+                  <SheetContent side="left" className="p-0 w-[240px]">
+                    <div className="flex items-center gap-3 p-4">
+                      <Image src="/logo.png" alt="BOCC" width={28} height={28} className="rounded-full" />
+                      <div className="text-sm font-extrabold tracking-tight">VariForce Admin</div>
+                    </div>
+                    <Separator />
+                    <nav className="p-3 space-y-1">
+                      {NAV.map((item) => {
+                        const active = pathname === item.href || pathname.startsWith(item.href + "/");
+                        return (
+                          <Button
+                            key={item.href}
+                            asChild
+                            variant={active ? "secondary" : "ghost"}
+                            className="w-full justify-between rounded-full"
+                          >
+                            <Link href={item.href} className="flex w-full items-center justify-between">
+                              <span className="inline-flex items-center gap-2">
+                                <item.icon className="h-4 w-4" aria-hidden />
+                                {item.label}
+                              </span>
+                              {active && <span className="ml-2 h-2 w-2 rounded-full bg-emerald-500" />}
+                            </Link>
+                          </Button>
+                        );
+                      })}
+                    </nav>
+                  </SheetContent>
+                </Sheet>
+              )}
 
               {/* Breadcrumbs + title */}
               <div className="flex min-w-0 items-center gap-3">
@@ -233,38 +264,42 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                 <LocalThemeToggle />
 
                 {/* Notifications */}
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="icon" aria-label="Notifications">
-                      🔔
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-64">
-                    <DropdownMenuLabel>Notifications</DropdownMenuLabel>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem className="text-muted-foreground">All clear — no new notifications.</DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                {mounted && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" size="icon" aria-label="Notifications">
+                        🔔
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-64">
+                      <DropdownMenuLabel>Notifications</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem className="text-muted-foreground">All clear — no new notifications.</DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
 
                 {/* Account */}
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" className="gap-2 px-2">
-                      <Avatar className="h-6 w-6">
-                        <AvatarFallback>A</AvatarFallback>
-                      </Avatar>
-                      <span className="hidden sm:inline text-sm">Admin</span>
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-56">
-                    <DropdownMenuLabel>Signed in as</DropdownMenuLabel>
-                    <DropdownMenuItem className="text-muted-foreground">admin@bocc.sa</DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem asChild>
-                      <Link href="/admin/logout" className="text-red-600">Log out</Link>
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                {mounted && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" className="gap-2 px-2">
+                        <Avatar className="h-6 w-6">
+                          <AvatarFallback>A</AvatarFallback>
+                        </Avatar>
+                        <span className="hidden sm:inline text-sm">Admin</span>
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-56">
+                      <DropdownMenuLabel>Signed in as</DropdownMenuLabel>
+                      <DropdownMenuItem className="text-muted-foreground">admin@bocc.sa</DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem asChild>
+                        <Link href="/admin/logout" className="text-red-600">Log out</Link>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
               </div>
             </div>
           </header>

@@ -1,226 +1,188 @@
-import * as React from "react";
-import Link from "next/link";
-import { redirect } from "next/navigation";
-import { revalidatePath } from "next/cache";
-import { createClient as createServiceClient } from "@supabase/supabase-js";
+'use client';
 
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
+import { useEffect, useState } from 'react';
+import { createClient } from '@supabase/supabase-js';
+import { useRouter } from 'next/navigation';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectTrigger,
+  SelectContent,
+  SelectItem,
+  SelectValue,
+} from '@/components/ui/select';
 
-function serviceClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const service = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-  return createServiceClient(url, service);
-}
+const ROLE_OPTIONS = [
+  'admin',
+  'company_manager',
+  'team_member',
+  'workforce_leader',
+  'technician',
+  'helper',
+] as const;
 
-// Optional helper: look up auth user by email using admin API
-async function findAuthUserByEmail(email: string) {
-  const sb = serviceClient();
-  // @ts-ignore: admin API is supported on server with service key
-  const { data, error } = await sb.auth.admin.listUsers({ page: 1, perPage: 50 });
-  if (error) return null;
-  const needle = email.toLowerCase();
-  return data.users.find((u: any) => (u.email || "").toLowerCase() === needle) || null;
-}
+const STATUS_OPTIONS = ['active', 'inactive', 'suspended'] as const;
 
-export async function createMemberAction(formData: FormData) {
-  "use server";
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
-  const tenant_id_raw = String(formData.get("tenant_id") ?? "").trim();
-  const tenant_id = tenant_id_raw.length ? tenant_id_raw : null;
+interface Tenant { id: string; name: string | null; status?: string | null }
+type CreateResp = { success?: boolean; data?: unknown; error?: string };
 
-  const role = String(formData.get("role") || "").trim();
-  const user_id_raw = String(formData.get("user_id") || "").trim();
-  const email_raw = String(formData.get("email") || "").trim();
+export default function NewMemberPage() {
+  const router = useRouter();
+  const [tenants, setTenants] = useState<Tenant[]>([]);
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [role, setRole] = useState<string>('team_member');
+  const [status, setStatus] = useState<string>('active');
+  const [tenantId, setTenantId] = useState<string>('');
+  const [userId, setUserId] = useState<string>('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // Which identifier are we using?
-  let user_id = user_id_raw || "";
+  useEffect(() => {
+    const loadTenants = async () => {
+      const { data, error } = await supabase
+        .from('tenants')
+        .select('id, name, status')
+        .eq('status', 'approved')
+        .order('name', { ascending: true });
 
-  if (!user_id && !email_raw) {
-    redirect("/admin/members/new?error=need_user");
-  }
+      if (error) console.error('Error loading tenants:', error);
+      setTenants(data || []);
+    };
+    loadTenants();
+  }, []);
 
-  // If email provided, resolve to auth user_id
-  if (!user_id && email_raw) {
-    const authUser = await findAuthUserByEmail(email_raw);
-    if (!authUser) {
-      redirect("/admin/members/new?error=user_not_found");
+  const handleCreate = async () => {
+    setSaving(true);
+    setError(null);
+    // Require User ID (compulsory)
+    if (!userId.trim()) {
+      setError('User ID is required');
+      setSaving(false);
+      return;
     }
-    user_id = authUser.id;
-  }
 
-  // Validate role against your enum set
-  const allowed = new Set([
-    "admin",
-    "team_member",          // BOCC ops (internal)
-    "workforce_leader",
-    "technician",
-    "helper",
-    "company_manager",      // tenant manager
-    "customer_employee"     // tenant employee
-  ]);
-  if (!allowed.has(role)) {
-    redirect("/admin/members/new?error=invalid_role");
-  }
+    const payload: Record<string, string> = {};
+    if (name.trim()) payload.name = name.trim();
+    if (email.trim()) payload.email = email.trim();
+    if (role.trim()) payload.role = role.trim();
+    if (status.trim()) payload.status = status.trim();
+    if (tenantId.trim()) payload.tenant_id = tenantId.trim();
+    if (userId.trim()) payload.user_id = userId.trim();
 
-  // Tenant must be present for tenant roles; internal roles can be null-tenant
-  const tenantRoles = new Set(["company_manager", "customer_employee"]);
-  if (tenantRoles.has(role) && !tenant_id) {
-    redirect("/admin/members/new?error=tenant_required");
-  }
+    try {
+      const res = await fetch('/admin/members/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ action: 'create', payload }),
+        cache: 'no-store',
+        credentials: 'same-origin',
+      });
 
-  const sb = serviceClient();
+      const ct = res.headers.get('content-type') || '';
+      let json: CreateResp | null = null;
+      let text: string | null = null;
+      if (ct.includes('application/json')) { try { json = await res.json(); } catch { json = null; } }
+      else { try { text = await res.text(); } catch { text = null; } }
 
-  // Insert directly into members
-  const { error: insertErr } = await sb
-    .from("members")
-    .insert({
-      id: crypto.randomUUID(),
-      tenant_id,             // null for internal BOCC staff
-      user_id,
-      role,                  // must match member_role enum
-      status: "active"
-    });
+      if (!res.ok) {
+        const msg = json?.error ?? text ?? `HTTP ${res.status}`;
+        setError(typeof msg === 'string' ? `${msg} (HTTP ${res.status})` : `HTTP ${res.status}`);
+        return;
+      }
 
-  // Optional audit trail
-  if (!insertErr) {
-    await sb.from("admin_actions").insert({
-      action: "create_member_manual",
-      entity: "member",
-      after_json: { tenant_id, user_id, role }
-    });
-  }
-
-  revalidatePath("/admin/dashboard");
-  if (insertErr) {
-    redirect(`/admin/members/new?error=insert_failed`);
-  }
-  redirect(`/admin/dashboard?ok=member_created`);
-}
-
-async function loadTenants() {
-  const sb = serviceClient();
-  const { data } = await sb
-    .from("tenants")
-    .select("id, name, status")
-    .order("name", { ascending: true });
-  return data ?? [];
-}
-
-export default async function NewMemberPage({
-  searchParams
-}: {
-  searchParams?: { [k: string]: string | string[] | undefined }
-}) {
-  const tenants = await loadTenants();
-  const ok = typeof searchParams?.ok === "string" ? String(searchParams?.ok) : null;
-  const error = typeof searchParams?.error === "string" ? String(searchParams?.error) : null;
+      router.push('/admin/members');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Unexpected error');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
-    <div className="px-4 py-6 md:px-6 lg:px-8">
-      <div className="mx-auto w-full max-w-3xl">
-        <div className="mb-4 flex items-center justify-between">
-          <h1 className="text-xl font-semibold tracking-tight">Link Existing Auth User → Create Member</h1>
-          <Link href="/admin/dashboard" className="inline-flex items-center rounded-full border px-3 py-1.5 text-sm hover:bg-emerald-50/50 dark:hover:bg-emerald-900/10">
-            ← Back to dashboard
-          </Link>
+    <div className="p-4 md:p-6 space-y-6 max-w-2xl">
+      <h1 className="text-xl font-semibold">New Member</h1>
+
+      <div className="grid gap-4">
+        <div className="grid gap-1">
+          <Label>Name</Label>
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Full name" />
         </div>
 
-        <div className="rounded-2xl border border-white/20 dark:border-white/10 bg-white/70 dark:bg-black/40 backdrop-blur p-6">
-          {ok && (
-            <div className="mb-4 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-900 dark:text-emerald-100 px-3 py-2 text-sm">
-              {ok === "member_created" ? "Member created." : "Success."}
-            </div>
-          )}
-          {error && (
-            <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 text-red-900 dark:text-red-100 px-3 py-2 text-sm">
-              {error === "need_user" && "Enter a user_id or email."}
-              {error === "user_not_found" && "No auth user found for that email."}
-              {error === "invalid_role" && "Selected role is not allowed."}
-              {error === "tenant_required" && "Tenant is required for company roles."}
-              {error === "insert_failed" && "Failed to create member. Please try again."}
-              {!["need_user","user_not_found","invalid_role","tenant_required","insert_failed"].includes(error) && "Something went wrong."}
-            </div>
-          )}
-
-          <p className="text-sm text-muted-foreground mb-5">
-            Use this when you already created a user in Supabase Auth and want to grant access by inserting a row into{" "}
-            <code>members</code>.
-          </p>
-
-          <form action={createMemberAction} className="grid gap-4">
-            <label className="grid gap-1">
-              <span className="text-xs">Tenant (required for company roles)</span>
-              <select name="tenant_id" className="h-11 rounded-md border px-3 bg-white/80 dark:bg-black/40" defaultValue="">
-                <option value="">BOCC (internal)</option>
-                {tenants.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name} {t.status === "inactive" ? "(inactive)" : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <label className="grid gap-1">
-                <span className="text-xs">Auth User ID (uuid)</span>
-                <input
-                  type="text"
-                  name="user_id"
-                  placeholder="paste user_id from Supabase Auth"
-                  className="h-11 rounded-md border px-3 bg-white/80 dark:bg-black/40"
-                />
-              </label>
-
-              <label className="grid gap-1">
-                <span className="text-xs">OR Auth Email (we’ll look it up)</span>
-                <input
-                  type="email"
-                  name="email"
-                  placeholder="user@company.com"
-                  className="h-11 rounded-md border px-3 bg-white/80 dark:bg-black/40"
-                />
-              </label>
-            </div>
-
-            <label className="grid gap-1">
-              <span className="text-xs">Role</span>
-              <select name="role" required className="h-11 rounded-md border px-3 bg-white/80 dark:bg-black/40" defaultValue="company_manager">
-                {/* Tenant roles */}
-                <option value="company_manager">Company Manager (Tenant)</option>
-                <option value="customer_employee">Company Employee (Tenant)</option>
-                {/* Internal BOCC roles */}
-                <option value="team_member">BOCC Team Member (Ops)</option>
-                <option value="workforce_leader">Workforce Leader</option>
-                <option value="technician">Technician</option>
-                <option value="helper">Helper</option>
-              </select>
-            </label>
-
-            <div className="flex items-center gap-2 pt-2">
-              <Link
-                href="/admin/dashboard"
-                className="inline-flex items-center rounded-full border px-3 py-1.5 text-sm hover:bg-emerald-50/50 dark:hover:bg-emerald-900/10"
-              >
-                Cancel
-              </Link>
-              <button
-                type="submit"
-                className="inline-flex items-center rounded-full border px-4 py-2 text-sm font-medium hover:bg-emerald-50/60 dark:hover:bg-emerald-900/20"
-              >
-                Create Member
-              </button>
-            </div>
-          </form>
-
-          <div className="mt-6 text-xs text-muted-foreground">
-            Tips:
-            <ul className="list-disc pl-5 mt-1 space-y-1">
-              <li>Use **tenant + company_manager** for the customer’s initial manager account.</li>
-              <li>Use **BOCC (internal) + team_member/workforce_leader/technician/helper** for BOCC staff.</li>
-            </ul>
-          </div>
+        <div className="grid gap-1">
+          <Label>Email</Label>
+          <Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com" />
         </div>
+
+        <div className="grid gap-1">
+          <Label>Role</Label>
+          <Select value={role} onValueChange={setRole}>
+            <SelectTrigger className="bg-white/60 dark:bg-emerald-950/40 border-emerald-500/30 backdrop-blur">
+              <SelectValue placeholder="Select role" />
+            </SelectTrigger>
+            <SelectContent className="backdrop-blur bg-white/80 dark:bg-emerald-950/80">
+              {ROLE_OPTIONS.map((r) => (
+                <SelectItem key={r} value={r}>{r}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="grid gap-1">
+          <Label>Status</Label>
+          <Select value={status} onValueChange={setStatus}>
+            <SelectTrigger className="bg-white/60 dark:bg-emerald-950/40 border-emerald-500/30 backdrop-blur">
+              <SelectValue placeholder="Select status" />
+            </SelectTrigger>
+            <SelectContent className="backdrop-blur bg-white/80 dark:bg-emerald-950/80">
+              {STATUS_OPTIONS.map((s) => (
+                <SelectItem key={s} value={s}>{s}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="grid gap-1">
+          <Label>Company</Label>
+          <Select value={tenantId} onValueChange={setTenantId}>
+            <SelectTrigger className="bg-white/60 dark:bg-emerald-950/40 border-emerald-500/30 backdrop-blur">
+              <SelectValue placeholder="Select company (tenant)" />
+            </SelectTrigger>
+            <SelectContent className="backdrop-blur bg-white/80 dark:bg-emerald-950/80 max-h-64 overflow-y-auto">
+              {tenants.map((t) => (
+                <SelectItem key={t.id} value={t.id}>{t.name ?? t.id}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="grid gap-1">
+          <Label>User ID</Label>
+          <Input
+            value={userId}
+            onChange={(e) => setUserId(e.target.value)}
+            placeholder="auth.users id (uuid)"
+            required
+          />
+        </div>
+      </div>
+
+      {error ? <div className="text-sm text-red-600">{error}</div> : null}
+
+      <div className="flex gap-3">
+        <Button onClick={handleCreate} disabled={saving}>
+          {saving ? 'Creating…' : 'Create Member'}
+        </Button>
+        <Button variant="outline" onClick={() => router.push('/admin/members')}>
+          Cancel
+        </Button>
       </div>
     </div>
   );
