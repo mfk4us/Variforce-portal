@@ -1,5 +1,7 @@
+/* cspell:words ilike */
 // app/admin/companies/page.tsx
 import Link from "next/link";
+import Image from "next/image";
 import type { LucideIcon } from "lucide-react";
 import { Building2, CheckCircle2, ChevronRight, Star } from "lucide-react";
 import { createClient as createServiceClient } from "@supabase/supabase-js";
@@ -12,6 +14,29 @@ export const revalidate = 0;
 export const fetchCache = "force-no-store";
 
 // ---- Types ----
+// Local row types to avoid `any`
+export interface MemberRow {
+  id: string;
+  role: string | null;
+  status: string | null;
+  created_at?: string | null;
+  users: {
+    full_name: string | null;
+    email: string | null;
+  };
+}
+
+type SimpleEntityRow = {
+  id: string;
+  title?: string | null;
+  name?: string | null;
+  number?: string | null;
+  status?: string | null;
+  total?: number | string | null;
+  reference?: string | null;
+  amount?: number | string | null;
+  created_at?: string | null;
+};
 export interface Tenant {
   id: string;
   uuid?: string | null;
@@ -235,11 +260,11 @@ function Stars({ value }: { value: number | null }) {
   );
 }
 // ---- Tab data loaders ----
-async function listMembers(tenantId: string) {
+async function listMembers(tenantId: string): Promise<MemberRow[]> {
   const sb = serviceClient();
 
   // 1) Read from `members` scoped to tenant, exclude soft-deleted, newest first
-  let rows: any[] = [];
+  let rows: unknown[] = [];
   try {
     const { data, error } = await sb
       .from("members")
@@ -248,7 +273,7 @@ async function listMembers(tenantId: string) {
       .is("deleted_at", null)
       .order("created_at", { ascending: false })
       .limit(200);
-    if (!error && data) rows = data as any[];
+    if (!error && data) rows = data as unknown[];
   } catch {}
 
   if (!rows.length) return [];
@@ -256,12 +281,12 @@ async function listMembers(tenantId: string) {
   // 2) Hydrate display fields from profiles/auth.users
   const ids = new Set<string>();
   for (const r of rows) {
-    if (r.user_id) ids.add(String(r.user_id));
+    if ((r as Record<string, unknown>).user_id) ids.add(String((r as Record<string, unknown>).user_id));
   }
   const idList = Array.from(ids);
 
-  const profilesByUserId: Record<string, any> = {};
-  const usersById: Record<string, any> = {};
+  const profilesByUserId: Record<string, { id?: string; user_id?: string; full_name?: string | null; email?: string | null } > = {};
+  const usersById: Record<string, { id: string; email?: string | null; raw_user_meta_data?: Record<string, unknown>; user_metadata?: Record<string, unknown> } > = {};
 
   if (idList.length) {
     try {
@@ -274,7 +299,7 @@ async function listMembers(tenantId: string) {
       }
     } catch {}
     // Enhanced: Try to load user name/email from auth.users with metadata
-    let usersData: any[] | null = null;
+    let usersData: Array<{ id: string; email?: string | null; raw_user_meta_data?: Record<string, unknown>; user_metadata?: Record<string, unknown> }> | null = null;
     try {
       // Try selecting modern column name first (raw_user_meta_data)
       const { data } = await sb
@@ -298,34 +323,53 @@ async function listMembers(tenantId: string) {
     for (const u of usersData ?? []) usersById[String(u.id)] = u;
   }
 
-  return rows.map((r) => {
-    const uid = String(r.user_id ?? "");
+  return (rows as Array<Record<string, unknown>>).map((r) => {
+    const uid = String((r as Record<string, unknown>).user_id ?? "");
     const p = profilesByUserId[uid];
     const u = usersById[uid];
-    const memberName = r.name ?? p?.full_name ??
-      (u?.raw_user_meta_data?.full_name || u?.raw_user_meta_data?.name || u?.user_metadata?.full_name || u?.user_metadata?.name);
-    const memberEmail = r.email ?? p?.email ?? u?.email;
+    const meta = (u?.raw_user_meta_data ?? u?.user_metadata) as Record<string, unknown> | undefined;
+    const metaName = typeof meta?.full_name === "string" ? meta?.full_name
+                    : typeof meta?.name === "string" ? meta?.name
+                    : null;
+
+    const memberName =
+      (r as Record<string, unknown>).name as string | null ??
+      (p?.full_name ?? null) ??
+      (metaName ?? null);
+
+    const memberEmail =
+      (r as Record<string, unknown>).email as string | null ??
+      (p?.email ?? null) ??
+      (u?.email ?? null);
+
     return {
-      id: r.id,
-      role: r.role ?? "—",
-      status: r.status ?? "—",
-      created_at: r.created_at,
+      id: String((r as Record<string, unknown>).id),
+      role: ((r as Record<string, unknown>).role as string | null) ?? "—",
+      status: ((r as Record<string, unknown>).status as string | null) ?? "—",
+      created_at: ((r as Record<string, unknown>).created_at as string | null) ?? null,
       users: {
-        full_name: memberName ?? "—",
-        email: memberEmail ?? "—",
+        full_name: memberName,
+        email: memberEmail,
       },
     };
   });
 }
 
 // Try multiple table names and tenant key candidates. Returns the first non-empty dataset.
-async function listMulti(options: { tables: string[]; tenantId: string; select: string; order?: string; limit?: number; keys?: string[]; }) {
+async function listMulti(options: {
+  tables: string[];
+  tenantId: string;
+  select: string;
+  order?: 'created_at' | 'updated_at' | 'inserted_at';
+  limit?: number;
+  keys?: string[];
+}) {
   const sb = serviceClient();
   const tables = options.tables;
   const select = options.select;
-  const order = options.order ?? "created_at";
+  const order = options.order ?? 'created_at';
   const limit = options.limit ?? 50;
-  const tenantKeys = options.keys ?? ["tenant_id", "company_id", "org_id"]; // common variations
+  const tenantKeys = options.keys ?? ['tenant_id', 'company_id', 'org_id']; // common variations
 
   for (const table of tables) {
     for (const key of tenantKeys) {
@@ -334,16 +378,16 @@ async function listMulti(options: { tables: string[]; tenantId: string; select: 
           .from(table)
           .select(select)
           .eq(key, options.tenantId)
-          .order(order as any, { ascending: false })
+          .order(order, { ascending: false })
           .limit(limit);
         const { data, error } = await q;
         if (!error && data && data.length) {
-          return { table, key, rows: data };
+          return { table, key, rows: (data as unknown[]) };
         }
       } catch {}
     }
   }
-  return { table: null, key: null, rows: [] };
+  return { table: null, key: null, rows: [] as unknown[] };
 }
 
 export default async function Page({ searchParams }: { searchParams: Promise<{ tenantId?: string; mode?: string; tab?: string }> }) {
@@ -361,12 +405,12 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
   try { _projRef = new URL(_sbUrl).hostname.split(".")[0] || null; } catch {}
   const supabaseRestMembers = editing ? `${_sbUrl}/rest/v1/members?tenant_id=eq.${encodeURIComponent(String(editing.id))}&select=*` : null;
   const supabaseStudioMembers = _projRef ? `https://app.supabase.com/project/${_projRef}/editor` : null;
-  let members: any[] = [];
-  let projects: any[] = [];
-  let surveys: any[] = [];
-  let estimates: any[] = [];
-  let invoices: any[] = [];
-  let payments: any[] = [];
+  let members: MemberRow[] = [];
+  let projects: SimpleEntityRow[] = [];
+  let surveys: SimpleEntityRow[] = [];
+  let estimates: SimpleEntityRow[] = [];
+  let invoices: SimpleEntityRow[] = [];
+  let payments: SimpleEntityRow[] = [];
   if (editing) {
     const tenantId = editing.id;
     if (activeTab === "members") {
@@ -378,7 +422,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
         tenantId,
         select: "id, title, name, number, status, total, created_at",
       });
-      projects = pr.rows;
+      projects = pr.rows as SimpleEntityRow[];
     }
     if (activeTab === "surveys") {
       const sv = await listMulti({
@@ -386,7 +430,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
         tenantId,
         select: "id, title, name, number, status, total, created_at",
       });
-      surveys = sv.rows;
+      surveys = sv.rows as SimpleEntityRow[];
     }
     if (activeTab === "estimates") {
       const es = await listMulti({
@@ -394,7 +438,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
         tenantId,
         select: "id, title, name, number, status, total, created_at",
       });
-      estimates = es.rows;
+      estimates = es.rows as SimpleEntityRow[];
     }
     if (activeTab === "invoices") {
       const iv = await listMulti({
@@ -402,7 +446,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
         tenantId,
         select: "id, title, name, number, status, total, created_at",
       });
-      invoices = iv.rows;
+      invoices = iv.rows as SimpleEntityRow[];
     }
     if (activeTab === "payments") {
       const pm = await listMulti({
@@ -410,7 +454,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
         tenantId,
         select: "id, reference, status, amount, total, created_at",
       });
-      payments = pm.rows;
+      payments = pm.rows as SimpleEntityRow[];
     }
   }
   const _debugBanner = showDebug ? (
@@ -453,7 +497,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
             <div className="sticky top-0 z-10 flex items-center justify-between gap-3 px-4 sm:px-6 py-3 border-b bg-white/90 dark:bg-neutral-900/90 backdrop-blur">
               <div className="min-w-0 flex items-center gap-2">
                 {editing.logo_url ? (
-                  <img src={editing.logo_url} alt="Logo" className="h-6 w-6 rounded object-cover border" />
+                  <Image src={editing.logo_url} alt="Logo" width={24} height={24} unoptimized className="h-6 w-6 rounded object-cover border" />
                 ) : (
                   <div className="h-6 w-6 rounded bg-muted border" />
                 )}
@@ -587,26 +631,26 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
                           </span>
                         </div>
                       )}
-                      <SimpleList
-                        headers={["Name", "Email", "Role", "Joined"]}
-                        rows={(members || []).map((m: any) => [
-                          m.users?.full_name ?? "—",
-                          m.users?.email ?? "—",
-                          m.role ?? "—",
-                          m.created_at ? new Date(m.created_at).toLocaleDateString() : "—",
-                        ])}
-                        empty="No members yet."
-                      />
+                  <SimpleList
+                    headers={["Name", "Email", "Role", "Joined"]}
+                    rows={(members || []).map((m: MemberRow) => [
+                      <span key={`n-${m.id}`}>{m.users?.full_name ?? "—"}</span>,
+                      <span key={`e-${m.id}`}>{m.users?.email ?? "—"}</span>,
+                      <span key={`r-${m.id}`}>{m.role ?? "—"}</span>,
+                      <span key={`j-${m.id}`}>{m.created_at ? new Date(m.created_at).toLocaleDateString() : "—"}</span>,
+                    ])}
+                    empty="No members yet."
+                  />
                     </>
                   )}
 
                   {activeTab === "projects" && (
                     <SimpleList
                       headers={["Project", "Status", "Created"]}
-                      rows={(projects || []).map((p: any) => [
-                        p.title ?? p.name ?? `#${p.id}`,
-                        p.status ?? "—",
-                        p.created_at ? new Date(p.created_at).toLocaleDateString() : "—",
+                      rows={(projects || []).map((p) => [
+                        <span key={`p-title-${p.id}`}>{p.title ?? p.name ?? `#${p.id}`}</span>,
+                        <span key={`p-status-${p.id}`}>{p.status ?? "—"}</span>,
+                        <span key={`p-date-${p.id}`}>{p.created_at ? new Date(p.created_at).toLocaleDateString() : "—"}</span>,
                       ])}
                       empty="No projects yet."
                     />
@@ -615,10 +659,10 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
                   {activeTab === "surveys" && (
                     <SimpleList
                       headers={["Survey", "Status", "Created"]}
-                      rows={(surveys || []).map((s: any) => [
-                        s.title ?? s.name ?? `#${s.id}`,
-                        s.status ?? "—",
-                        s.created_at ? new Date(s.created_at).toLocaleDateString() : "—",
+                      rows={(surveys || []).map((s) => [
+                        <span key={`s-title-${s.id}`}>{s.title ?? s.name ?? `#${s.id}`}</span>,
+                        <span key={`s-status-${s.id}`}>{s.status ?? "—"}</span>,
+                        <span key={`s-date-${s.id}`}>{s.created_at ? new Date(s.created_at).toLocaleDateString() : "—"}</span>,
                       ])}
                       empty="No surveys yet."
                     />
@@ -627,11 +671,11 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
                   {activeTab === "estimates" && (
                     <SimpleList
                       headers={["Estimate", "Status", "Total", "Created"]}
-                      rows={(estimates || []).map((e: any) => [
-                        e.number ?? e.title ?? `#${e.id}`,
-                        e.status ?? "—",
-                        e.total ?? "—",
-                        e.created_at ? new Date(e.created_at).toLocaleDateString() : "—",
+                      rows={(estimates || []).map((e) => [
+                        <span key={`e-num-${e.id}`}>{e.number ?? e.title ?? `#${e.id}`}</span>,
+                        <span key={`e-status-${e.id}`}>{e.status ?? "—"}</span>,
+                        <span key={`e-total-${e.id}`}>{e.total ?? "—"}</span>,
+                        <span key={`e-date-${e.id}`}>{e.created_at ? new Date(e.created_at).toLocaleDateString() : "—"}</span>,
                       ])}
                       empty="No estimates yet."
                     />
@@ -640,11 +684,11 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
                   {activeTab === "invoices" && (
                     <SimpleList
                       headers={["Invoice", "Status", "Total", "Created"]}
-                      rows={(invoices || []).map((iv: any) => [
-                        iv.number ?? iv.title ?? `#${iv.id}`,
-                        iv.status ?? "—",
-                        iv.total ?? "—",
-                        iv.created_at ? new Date(iv.created_at).toLocaleDateString() : "—",
+                      rows={(invoices || []).map((iv) => [
+                        <span key={`i-num-${iv.id}`}>{iv.number ?? iv.title ?? `#${iv.id}`}</span>,
+                        <span key={`i-status-${iv.id}`}>{iv.status ?? "—"}</span>,
+                        <span key={`i-total-${iv.id}`}>{iv.total ?? "—"}</span>,
+                        <span key={`i-date-${iv.id}`}>{iv.created_at ? new Date(iv.created_at).toLocaleDateString() : "—"}</span>,
                       ])}
                       empty="No invoices yet."
                     />
@@ -653,11 +697,11 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
                   {activeTab === "payments" && (
                     <SimpleList
                       headers={["Payment", "Status", "Amount", "Created"]}
-                      rows={(payments || []).map((pm: any) => [
-                        pm.reference ?? pm.number ?? `#${pm.id}`,
-                        pm.status ?? "—",
-                        pm.amount ?? pm.total ?? "—",
-                        pm.created_at ? new Date(pm.created_at).toLocaleDateString() : "—",
+                      rows={(payments || []).map((pm) => [
+                        <span key={`pm-ref-${pm.id}`}>{pm.reference ?? pm.number ?? `#${pm.id}`}</span>,
+                        <span key={`pm-status-${pm.id}`}>{pm.status ?? "—"}</span>,
+                        <span key={`pm-amt-${pm.id}`}>{pm.amount ?? pm.total ?? "—"}</span>,
+                        <span key={`pm-date-${pm.id}`}>{pm.created_at ? new Date(pm.created_at).toLocaleDateString() : "—"}</span>,
                       ])}
                       empty="No payments yet."
                     />
@@ -698,7 +742,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
             (
               <div key={`company-${r.id}`} className="flex items-center gap-3 min-w-0">
                 {r.logo_url ? (
-                  <img src={r.logo_url} alt="Logo" className="h-6 w-6 rounded object-cover border" />
+                  <Image src={r.logo_url} alt="Logo" width={24} height={24} unoptimized className="h-6 w-6 rounded object-cover border" />
                 ) : (
                   <div className="h-6 w-6 rounded bg-muted border" />
                 )}
@@ -707,18 +751,20 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
                 </span>
               </div>
             ),
-            <span className={isBlank(r.cr_number) ? "text-red-600" : ""}>{r.cr_number ?? "—"}</span>,
-            <span className={isBlank(r.vat_number) ? "text-red-600" : ""}>{r.vat_number ?? "—"}</span>,
+            <span key={`cr-${r.id}`} className={isBlank(r.cr_number) ? "text-red-600" : ""}>{r.cr_number ?? "—"}</span>,
+            <span key={`vat-${r.id}`} className={isBlank(r.vat_number) ? "text-red-600" : ""}>{r.vat_number ?? "—"}</span>,
             (
-              <div className="flex flex-col gap-1">
+              <div key={`rat-${r.id}`} className="flex flex-col gap-1">
                 <div className="flex items-center gap-2"><span className="text-xs text-muted-foreground">Team</span><Stars value={clampRating(r.rating_team ?? null)} /></div>
                 <div className="flex items-center gap-2"><span className="text-xs text-muted-foreground">Clients</span><Stars value={clampRating(r.rating_customer ?? null)} /></div>
               </div>
             ),
-            (() => {
-              const d = r.created_at ?? r.inserted_at ?? r.approved_at;
-              return d ? new Date(d).toLocaleDateString() : "—";
-            })(),
+            <span key={`created-${r.id}`}>
+              {(() => {
+                const d = r.created_at ?? r.inserted_at ?? r.approved_at;
+                return d ? new Date(d).toLocaleDateString() : "—";
+              })()}
+            </span>,
             <ActionCell key={`ac-${r.id}`} id={r.id} uuid={r.uuid} slug={r.slug} />,
           ])}
         />

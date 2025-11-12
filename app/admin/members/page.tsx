@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -55,7 +54,6 @@ export default function AdminMembersPage() {
   const [search, setSearch] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const router = useRouter();
   const [createOpen, setCreateOpen] = useState(false);
   const [tenants, setTenants] = useState<{ id: string; name: string | null }[]>([]);
   const [cName, setCName] = useState('');
@@ -115,8 +113,8 @@ export default function AdminMembersPage() {
       id: m.id,
       name: m.name ?? '',
       email: m.email ?? '',
-      role: (m.role ?? '') as Role | '',
-      status: (m.status ?? '') as Status | '',
+      role: m.role ?? null,
+      status: m.status ?? null,
     });
     setSaveError(null);
   };
@@ -127,9 +125,10 @@ export default function AdminMembersPage() {
     setSaveError(null);
   };
 
-  const setField = (field: keyof Member, value: string) => {
-    setEdited((prev) => ({ ...prev, [field]: value }));
-  };
+  const setName = (value: string) => setEdited((prev) => ({ ...prev, name: value }));
+  const setEmail = (value: string) => setEdited((prev) => ({ ...prev, email: value }));
+  const setRole = (value: Role) => setEdited((prev) => ({ ...prev, role: value }));
+  const setStatus = (value: Status) => setEdited((prev) => ({ ...prev, status: value }));
 
   const saveEdit = async () => {
     if (!editingId) return;
@@ -137,10 +136,10 @@ export default function AdminMembersPage() {
     setSaveError(null);
 
     const changed: Record<string, string> = {};
-    (['name', 'email', 'role', 'status'] as const).forEach((k) => {
-      const v = (edited as Record<string, unknown>)[k];
-      if (typeof v === 'string' && v.trim()) changed[k] = v.trim();
-    });
+    if (typeof edited.name === 'string' && edited.name.trim()) changed.name = edited.name.trim();
+    if (typeof edited.email === 'string' && edited.email.trim()) changed.email = edited.email.trim();
+    if (edited.role) changed.role = edited.role;
+    if (edited.status) changed.status = edited.status;
     if (Object.keys(changed).length === 0) {
       setSaveError('Nothing to update');
       setSaving(false);
@@ -183,8 +182,10 @@ export default function AdminMembersPage() {
         setSaveError('Save succeeded but API returned no data');
         return;
       }
-
-      setRows((prev) => prev.map((m) => (m.id === editingId ? { ...m, ...json.data! } : m)));
+      setRows((prev) => {
+        const updated = json!.data as Member;
+        return prev.map((m) => (m.id === editingId ? { ...m, ...updated } : m));
+      });
       cancelEdit();
     } catch (e) {
       setSaveError(e instanceof Error ? e.message : 'Unexpected error');
@@ -211,7 +212,7 @@ export default function AdminMembersPage() {
         body: JSON.stringify({ action: 'create', payload }),
       });
       const ct = res.headers.get('content-type') || '';
-      let json: any = null; let text: string | null = null;
+      let json: UpdateResp | null = null; let text: string | null = null;
       if (ct.includes('application/json')) { try { json = await res.json(); } catch { json = null; } }
       else { try { text = await res.text(); } catch { text = null; } }
 
@@ -222,7 +223,8 @@ export default function AdminMembersPage() {
       }
 
       // Prepend new row and close modal
-      setRows((prev) => [json.data, ...prev]);
+      const created = json!.data as Member; // json.data is guaranteed by the guard above
+      setRows((prev) => [created, ...prev]);
       setCreateOpen(false);
       setCName(''); setCEmail(''); setCRole('team_member'); setCStatus('active'); setCTenantId(''); setCUserId('');
     } catch (e) {
@@ -275,7 +277,7 @@ export default function AdminMembersPage() {
                         <Input
                           className="bg-white/60 dark:bg-emerald-950/40 border-emerald-500/30 backdrop-blur"
                           value={(edited.name as string) ?? ''}
-                          onChange={(e) => setField('name', e.target.value)}
+                          onChange={(e) => setName(e.target.value)}
                         />
                       ) : (
                         m.name || '—'
@@ -286,7 +288,7 @@ export default function AdminMembersPage() {
                         <Input
                           className="bg-white/60 dark:bg-emerald-950/40 border-emerald-500/30 backdrop-blur"
                           value={(edited.email as string) ?? ''}
-                          onChange={(e) => setField('email', e.target.value)}
+                          onChange={(e) => setEmail(e.target.value)}
                         />
                       ) : (
                         m.email || '—'
@@ -298,8 +300,8 @@ export default function AdminMembersPage() {
                     <td className="p-2">
                       {isEditing ? (
                         <Select
-                          value={(edited.role as string) ?? (m.role ?? '')}
-                          onValueChange={(v) => setField('role', v)}
+                          value={(edited.role ?? m.role) ?? undefined}
+                          onValueChange={(v) => setRole(v as Role)}
                         >
                           <SelectTrigger className="w-[180px] bg-white/60 dark:bg-emerald-950/40 border-emerald-500/30 backdrop-blur">
                             <SelectValue placeholder="Select role" />
@@ -319,8 +321,8 @@ export default function AdminMembersPage() {
                     <td className="p-2">
                       {isEditing ? (
                         <Select
-                          value={(edited.status as string) ?? (m.status ?? '')}
-                          onValueChange={(v) => setField('status', v)}
+                          value={(edited.status ?? m.status) ?? undefined}
+                          onValueChange={(v) => setStatus(v as Status)}
                         >
                           <SelectTrigger className="w-[160px] bg-white/60 dark:bg-emerald-950/40 border-emerald-500/30 backdrop-blur">
                             <SelectValue placeholder="Select status" />

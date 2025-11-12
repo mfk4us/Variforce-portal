@@ -1,3 +1,5 @@
+/* cspell:words ilike nums */
+const NOW = Date.now();
 /**
  * Admin → Dashboard
  * Server component that fetches KPI counts via Supabase (RLS).
@@ -6,7 +8,8 @@ import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import * as React from "react";
 import { createClient as createServiceClient } from "@supabase/supabase-js";
-import { revalidatePath, redirect } from "next/navigation";
+import { redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
 import Link from "next/link";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -33,14 +36,15 @@ export const fetchCache = "force-no-store";
 // so that RLS on tenant-scoped tables doesn't filter out global admin visibility.
 
 // RSC-safe cookie adapter (no-ops for mutators)
-function rlsClient() {
+async function rlsClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
   const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+  const cookieStore = await cookies();
   return createServerClient(url, anon, {
     cookies: {
       get(name: string) {
         try {
-          return cookies().get(name)?.value;
+          return cookieStore.get(name)?.value;
         } catch {
           return undefined;
         }
@@ -67,16 +71,16 @@ function slugify(input: string) {
     .slice(0, 60);
 }
 
-async function safeCount<T extends Record<string, any>>(
+async function safeCount(
   table: string,
-  opts: { eq?: [key: string, val: any]; gteDate?: [key: string, days: number]; useService?: boolean } = {}
+  opts: { eq?: [key: string, unknown]; gteDate?: [key: string, days: number]; useService?: boolean } = {}
 ) {
   try {
-    const sb = opts.useService ? serviceClient() : rlsClient();
+    const sb = opts.useService ? serviceClient() : await rlsClient();
     let q = sb.from(table).select("*", { count: "exact", head: true });
     if (opts.eq) {
       const [k, v] = opts.eq;
-      q = q.eq(k, v as any);
+      q = q.eq(k, v as string | number | boolean | null);
     }
     if (opts.gteDate) {
       const [k, days] = opts.gteDate;
@@ -92,22 +96,22 @@ async function safeCount<T extends Record<string, any>>(
   }
 }
 
-async function safeList<T = any>(
+async function safeList(
   table: string,
   opts: {
     select?: string;
     order?: [column: string, { ascending?: boolean }?];
     limit?: number;
-    eq?: [key: string, val: any];
+    eq?: [key: string, val: unknown];
     useService?: boolean;
   } = {}
-): Promise<T[]> {
+): Promise<unknown[]> {
   try {
-    const sb = opts.useService ? serviceClient() : rlsClient();
+    const sb = opts.useService ? serviceClient() : await rlsClient();
     let q = sb.from(table).select(opts.select || "*");
     if (opts.eq) {
       const [k, v] = opts.eq;
-      q = q.eq(k, v as any);
+      q = q.eq(k, v as string | number | boolean | null);
     }
     if (opts.order) {
       const [col, cfg] = opts.order;
@@ -116,9 +120,9 @@ async function safeList<T = any>(
     if (opts.limit) q = q.limit(opts.limit);
     const { data, error } = await q;
     if (error) throw error;
-    return (data as T[]) || [];
+    return (data as unknown[]) || [];
   } catch {
-    return [] as T[];
+    return [] as unknown[];
   }
 }
 
@@ -256,7 +260,7 @@ export async function createTenantAction(formData: FormData) {
   }
 
   // 2) Invite manager user with default_tenant_id + role metadata
-  const { data: invite, error: inviteErr } = await sb.auth.admin.inviteUserByEmail(email, {
+  const { error: inviteErr } = await sb.auth.admin.inviteUserByEmail(email, {
     data: {
       full_name: name + " Manager",
       default_tenant_id: tenant.id,
@@ -306,11 +310,7 @@ export async function createWorkforceAction(formData: FormData) {
   redirect("/admin/dashboard?ok=workforce_invited");
 }
 
-export default async function AdminDashboardPage({
-  searchParams,
-}: {
-  searchParams?: { [key: string]: string | string[] | undefined };
-}) {
+export default async function AdminDashboardPage() {
   const counts = await getDashboardCounts();
   const [partnerApps, recentProjects, recentEstimates, recentInvoices, recentMembers] = await Promise.all([
     getRecentPartnerApplications(),
@@ -367,12 +367,13 @@ export default async function AdminDashboardPage({
             <TableList
               empty="No partner applications."
               headers={["Company", "Contact", "Phone", "Status", "Created"]}
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
               rows={partnerApps.map((r: any) => [
                 r.company_name ?? r.company ?? r.name ?? "—",
                 r.contact_name ?? r.requester_name ?? r.contact_email ?? "—",
                 r.contact_phone ?? r.phone ?? "—",
                 StatusBadge.inline(r.status),
-                new Date(r.created_at ?? r.inserted_at ?? Date.now()).toLocaleDateString(),
+                new Date(r.created_at ?? r.inserted_at ?? NOW).toLocaleDateString(),
               ])}
             />
           </CardBlock>
@@ -381,6 +382,7 @@ export default async function AdminDashboardPage({
             <TableList
               empty="No survey requests."
               headers={["Requester", "Phone", "Project", "Status", "Created"]}
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
               rows={recentSurveys.map((s: any) => [
                 s.requester_name ?? s.customer_name ?? s.name ?? "—",
                 s.requester_phone ?? "—",
@@ -395,6 +397,7 @@ export default async function AdminDashboardPage({
             <TableList
               empty="No projects found."
               headers={["Project", "Customer", "Stage", "Created"]}
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
               rows={recentProjects.map((p: any) => [
                 p.name ?? "—",
                 p.customer_name ?? "—",
@@ -408,12 +411,13 @@ export default async function AdminDashboardPage({
             <TableList
               empty="No members yet."
               headers={["Name", "Email", "Role", "Joined"]}
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
               rows={recentMembers.map((m: any) => {
                 const memberName = m.full_name ?? m.name ?? m.display_name ?? "—";
                 const companyName = (m.tenant && m.tenant.name) ?? m.company_name ?? m.tenant_name ?? (m.tenant_id ? "Company" : "BOCC");
                 const email = m.email ?? m.contact_email ?? m.user_email ?? "—";
                 const role = m.role ?? m.internal_role ?? m.title ?? "—";
-                const joined = new Date(m.created_at ?? m.inserted_at ?? Date.now()).toLocaleDateString();
+                const joined = new Date(m.created_at ?? m.inserted_at ?? NOW).toLocaleDateString();
                 return [
                   `${memberName} · ${companyName}`,
                   email,
@@ -431,6 +435,7 @@ export default async function AdminDashboardPage({
             <TableList
               empty="No estimates yet."
               headers={["#", "Customer", "Total", "Status", "Created"]}
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
               rows={recentEstimates.map((e: any) => [
                 e.number ?? e.id,
                 e.customer_name ?? "—",
@@ -445,6 +450,7 @@ export default async function AdminDashboardPage({
             <TableList
               empty="No invoices yet."
               headers={["#", "Customer", "Total", "Status", "Created"]}
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
               rows={recentInvoices.map((i: any) => [
                 i.number ?? i.id,
                 i.customer_name ?? "—",
