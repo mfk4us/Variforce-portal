@@ -1,8 +1,6 @@
-'use client';
 /* cspell:ignore ilike */
 
-import { useEffect, useMemo, useState } from 'react';
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { createClient } from '@supabase/supabase-js';
 import Link from 'next/link';
 
 // ---- Types ----
@@ -16,7 +14,7 @@ type Project = {
   id: string;
   name: string | null;
   description?: string | null;
-  status?: 'new' | 'estimate' | 'approved' | 'in_progress' | 'completed' | 'archived' | string | null;
+  status?: 'idea' | 'estimation' | 'survey' | 'install' | 'closed' | string | null;
   view_mode?: string | null;
   tenant_id?: string | null;
   created_at?: string | null;
@@ -27,19 +25,20 @@ type Project = {
 type Row = Project & { tenant: Tenant | null };
 
 // ---- Helpers ----
-function makeSupabase(): SupabaseClient {
+function makeSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-  return createClient(url, key, { auth: { persistSession: false } });
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+  return createClient(url, serviceKey, {
+    auth: { persistSession: false },
+  });
 }
 
 const STATUS_BADGE: Record<string, string> = {
-  new: 'bg-emerald-100/50 text-emerald-700 border-emerald-300',
-  estimate: 'bg-blue-100/50 text-blue-700 border-blue-300',
-  approved: 'bg-emerald-200/60 text-emerald-800 border-emerald-400',
-  in_progress: 'bg-amber-100/60 text-amber-800 border-amber-300',
-  completed: 'bg-gray-200/60 text-gray-800 border-gray-300',
-  archived: 'bg-slate-200/60 text-slate-700 border-slate-300',
+  idea: 'bg-emerald-100/50 text-emerald-700 border-emerald-300',
+  estimation: 'bg-blue-100/50 text-blue-700 border-blue-300',
+  survey: 'bg-amber-100/60 text-amber-800 border-amber-300',
+  install: 'bg-purple-100/60 text-purple-800 border-purple-300',
+  closed: 'bg-gray-200/60 text-gray-800 border-gray-300',
 };
 
 function Badge({ status }: { status?: string | null }) {
@@ -70,94 +69,70 @@ function Logo({ src, alt, size = 24 }: { src?: string | null; alt: string; size?
   );
 }
 
-export default function ProjectsPage() {
-  const supabase = useMemo(makeSupabase, []);
-  const [rows, setRows] = useState<Row[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [q, setQ] = useState('');
-  const [status, setStatus] = useState<string>(''); // All by default
-  const [refreshTick, setRefreshTick] = useState(0);
+export default async function ProjectsPage({
+  searchParams,
+}: {
+  searchParams?: { q?: string; status?: string };
+}) {
+  const q = (searchParams?.q ?? '').trim();
+  const selectedStatus = (searchParams?.status ?? '').trim();
 
-  useEffect(() => {
-    let cancelled = false;
-    async function run() {
-      setLoading(true);
-      setErrorMsg(null);
-      try {
-        // 1) Load projects (only columns that exist per API docs)
-        let query = supabase
-          .from('projects')
-          .select('id,name,description,status,view_mode,tenant_id,created_at,updated_at')
-          .order('created_at', { ascending: false })
-          .limit(100);
+  const supabase = makeSupabase();
 
-        if (q.trim()) {
-          // Search by project name or description
-          const term = q.trim();
-          query = query.or([
-            `name.ilike.%${term}%`,
-            `description.ilike.%${term}%`,
-          ].join(','));
-        }
+  let query = supabase
+    .from('projects')
+    .select('id,name,description,status,view_mode,tenant_id,created_at,updated_at')
+    .order('created_at', { ascending: false })
+    .limit(100);
 
-        if (status) {
-          query = query.eq('status', status);
-        }
+  if (q) {
+    query = query.or([
+      `name.ilike.%${q}%`,
+      `description.ilike.%${q}%`,
+    ].join(','));
+  }
 
-        const { data: projects, error } = await query;
-        if (error) throw new Error(error.message || JSON.stringify(error));
+  if (selectedStatus) {
+    query = query.eq('status', selectedStatus);
+  }
 
-        // 2) Load tenant records in one batch to avoid relying on FK alias names
-        const tenantIds = Array.from(
-          new Set((projects ?? []).map((p) => p.tenant_id).filter((x): x is string => !!x))
-        );
+  const { data: projects, error } = await query;
 
-        let tenantsById = new Map<string, Tenant>();
-        if (tenantIds.length) {
-          const { data: tenants, error: tErr } = await supabase
-            .from('tenants')
-            .select('id,name,logo_url')
-            .in('id', tenantIds);
-          if (tErr) throw new Error(tErr.message || JSON.stringify(tErr));
-          tenantsById = new Map((tenants ?? []).map((t) => [t.id, t] as const));
-        }
+  // Load tenant records in one batch to avoid relying on FK alias names
+  const tenantIds = Array.from(
+    new Set((projects ?? []).map((p) => p.tenant_id).filter((x): x is string => !!x))
+  );
 
-        const hydrated: Row[] = (projects ?? []).map((p) => ({
-          ...p,
-          tenant: p.tenant_id ? (tenantsById.get(p.tenant_id) ?? null) : null,
-        }));
+  let tenantsById = new Map<string, Tenant>();
+  if (tenantIds.length) {
+    const { data: tenants, error: tErr } = await supabase
+      .from('tenants')
+      .select('id,name,logo_url')
+      .in('id', tenantIds);
+    if (tErr) throw new Error(tErr.message || JSON.stringify(tErr));
+    tenantsById = new Map((tenants ?? []).map((t) => [t.id, t] as const));
+  }
 
-        if (!cancelled) setRows(hydrated);
-      } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : String(e);
-        if (!cancelled) setErrorMsg(msg || 'Failed to load projects');
-        console.error('load projects error:', e);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-    run();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, status, refreshTick]);
+  const hydrated: Row[] = (projects ?? []).map((p) => ({
+    ...p,
+    tenant: p.tenant_id ? (tenantsById.get(p.tenant_id) ?? null) : null,
+  }));
 
-  const empty = !loading && rows.length === 0 && !errorMsg;
+  const rows = hydrated;
+  const errorMsg = error ? (error.message || JSON.stringify(error)) : null;
+  const empty = !rows.length && !errorMsg;
 
   return (
     <div className="p-6">
       <div className="mb-4 flex items-center justify-between">
         <h1 className="text-xl font-semibold">Projects</h1>
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => setRefreshTick((n) => n + 1)}
+          <Link
+            href="/admin/projects"
             className="rounded-md border bg-white/40 backdrop-blur px-3 py-2 text-sm hover:bg-white/60 transition"
-            title="Refresh"
           >
             Refresh
-          </button>
+          </Link>
           <Link
             href="/admin/projects/new"
             className="rounded-md border border-emerald-300 bg-emerald-50/70 text-emerald-900 px-3 py-2 text-sm hover:bg-emerald-100 transition"
@@ -168,31 +143,38 @@ export default function ProjectsPage() {
       </div>
 
       {/* Filters */}
-      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <form className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3" method="GET">
         <div className="flex items-center gap-2">
           <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
+            name="q"
+            defaultValue={q}
             placeholder="Search projects…"
             className="w-full rounded-md border bg-white/50 backdrop-blur px-3 py-2 text-sm outline-none ring-emerald-500/20 focus:ring-2"
           />
         </div>
         <div className="flex items-center gap-2">
           <select
-            value={status}
-            onChange={(e) => setStatus(e.target.value)}
+            name="status"
+            defaultValue={selectedStatus}
             className="w-full rounded-md border bg-white/50 backdrop-blur px-3 py-2 text-sm outline-none ring-emerald-500/20 focus:ring-2"
           >
             <option value="">All statuses</option>
-            <option value="new">New</option>
-            <option value="estimate">Estimate</option>
-            <option value="approved">Approved</option>
-            <option value="in_progress">In Progress</option>
-            <option value="completed">Completed</option>
-            <option value="archived">Archived</option>
+            <option value="idea">Idea</option>
+            <option value="estimation">Estimation</option>
+            <option value="survey">Survey</option>
+            <option value="install">Install</option>
+            <option value="closed">Closed</option>
           </select>
         </div>
-      </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="submit"
+            className="rounded-md border bg-white/40 backdrop-blur px-3 py-2 text-sm hover:bg-white/60 transition"
+          >
+            Apply
+          </button>
+        </div>
+      </form>
 
       {/* Error */}
       {errorMsg && (
@@ -214,14 +196,7 @@ export default function ProjectsPage() {
             </tr>
           </thead>
           <tbody>
-            {loading && (
-              <tr>
-                <td className="px-3 py-4" colSpan={5}>
-                  Loading…
-                </td>
-              </tr>
-            )}
-            {!loading && rows.map((r) => {
+            {rows.map((r) => {
               const d = r.created_at ? new Date(r.created_at) : null;
               const created = d ? d.toLocaleDateString() : '—';
               return (
