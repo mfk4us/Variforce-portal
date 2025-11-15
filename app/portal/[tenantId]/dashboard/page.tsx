@@ -74,13 +74,10 @@ export default async function TenantDashboard({ params }: Params) {
 
   return (
     <div className="p-6 space-y-8">
-      {/* Header */}
-      <div className="flex flex-col gap-2">
-        <h1 className="text-2xl font-semibold">Dashboard</h1>
-        <p className="text-sm opacity-70">
-          Welcome to your workspace. Create a project, upload files, or request a site survey.
-        </p>
-      </div>
+      {/* Intro (small helper text, no duplicate heading) */}
+      <p className="text-sm opacity-70">
+        Welcome to your workspace. Use the quick actions below to create a project, upload files, or request a site survey.
+      </p>
 
       {/* Quick actions */}
       <div className="flex flex-wrap gap-3">
