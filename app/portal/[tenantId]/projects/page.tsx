@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createServiceClient } from "@/lib/supabase/server";
 import ProjectsBoardClient from "./ProjectsBoardClient";
+import { Eye, Trash2 } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -9,17 +10,23 @@ export const dynamic = "force-dynamic";
 const DEFAULT_TENANT_ID = "24f1fddd-76c0-4b05-b600-06ef351109e2";
 
 function normalizeStatus(status: string | null | undefined): string {
-  if (!status) return "estimation";
+  if (!status) return "open";
   const s = status.toString().toLowerCase().trim().replace(/\s+/g, "_");
 
-  // Map DB enum values to UI statuses
-  if (s === "idea") return "estimation"; // legacy default maps into Estimation column
-  if (s === "estimation") return "estimation";
+  // Legacy mapping
+  if (s === "idea") return "open";
+
+  // Known statuses in the current lifecycle
+  if (s === "open") return "open";
   if (s === "survey") return "survey";
+  if (s === "estimation") return "estimation";
+  if (s === "sent_to_customer") return "sent_to_customer";
+  if (s === "customer_approved") return "customer_approved";
+  if (s === "customer_rejected") return "customer_rejected";
   if (s === "install") return "install";
   if (s === "closed") return "closed";
 
-  // Fallback: just return the normalized value so we can at least display it
+  // Fallback: show the normalized raw value
   return s;
 }
 
@@ -37,8 +44,12 @@ function mapUiStatusToDb(status: string): string {
 }
 
 const STATUS_LABELS: Record<string, string> = {
-  estimation: "Estimation",
+  open: "Open",
   survey: "Survey",
+  estimation: "Estimation",
+  sent_to_customer: "Sent to client",
+  customer_approved: "Client approved",
+  customer_rejected: "Client declined",
   install: "Install",
   closed: "Closed",
 };
@@ -88,6 +99,43 @@ export async function updateProjectStatusAction(input: {
   return { ok: true as const, project: data[0] };
 }
 
+export async function deleteProjectAction(formData: FormData) {
+  "use server";
+
+  const projectId = formData.get("projectId") as string | null;
+  const tenantId = formData.get("tenantId") as string | null;
+
+  if (!projectId || !tenantId) {
+    console.error("deleteProjectAction called without projectId or tenantId", {
+      projectId,
+      tenantId,
+    });
+    return { ok: false as const, error: "Missing projectId or tenantId" };
+  }
+
+  const supabase = createServiceClient();
+
+  const { error } = await supabase
+    .from("projects")
+    .update({ deleted_at: new Date().toISOString() })
+    .eq("id", projectId)
+    .eq("tenant_id", tenantId)
+    .is("deleted_at", null);
+
+  if (error) {
+    console.error("Supabase error deleting project", {
+      error,
+      projectId,
+      tenantId,
+    });
+    return { ok: false as const, error: error.message ?? "Unknown Supabase error" };
+  }
+
+  // Optional: activity log entry can be added later if needed
+
+  return { ok: true as const };
+}
+
 interface ProjectsPageProps {
   params: Promise<{ tenantId: string }>;
   searchParams?: Promise<{ status?: string; view?: string; q?: string }>;
@@ -119,6 +167,7 @@ export default async function ProjectsPage({
     .from("projects")
     .select("id, name, status, updated_at, tenant_id")
     .eq("tenant_id", effectiveTenantId)
+    .is("deleted_at", null)
     .order("updated_at", { ascending: false });
 
   if (searchQuery) {
@@ -157,8 +206,12 @@ export default async function ProjectsPage({
 
   const statusOptions = [
     { key: "all", label: "All" },
-    { key: "estimation", label: "Estimation" },
+    { key: "open", label: "Open" },
     { key: "survey", label: "Survey" },
+    { key: "estimation", label: "Estimation" },
+    { key: "sent_to_customer", label: "Sent to client" },
+    { key: "customer_approved", label: "Client approved" },
+    { key: "customer_rejected", label: "Client declined" },
     { key: "install", label: "Install" },
     { key: "closed", label: "Closed" },
   ];
@@ -170,41 +223,43 @@ export default async function ProjectsPage({
         {/* Left: helper text + filters */}
         <div className="space-y-2">
           <p className="text-sm text-muted-foreground">
-            Manage all your projects for this workspace. Filter by status or
-            switch to board view.
+            {viewMode === "table"
+              ? "Manage all your projects for this workspace. Filter by status or switch to board view."
+              : "Manage all your projects for this workspace. Drag projects between stages or search by name in the board below."}
           </p>
 
-          {/* Status filters */}
-          <div className="flex flex-wrap gap-2 text-xs">
-            {statusOptions.map((opt) => {
-              const isActive = statusFilter === opt.key;
+          {viewMode === "table" && (
+            <div className="flex flex-wrap gap-2 text-xs">
+              {statusOptions.map((opt) => {
+                const isActive = statusFilter === opt.key;
 
-              const href = (() => {
-                if (opt.key === "all") {
-                  return viewMode === "board"
-                    ? `/portal/${effectiveTenantId}/projects?view=board`
-                    : `/portal/${effectiveTenantId}/projects`;
-                }
-                const base = `/portal/${effectiveTenantId}/projects?status=${opt.key}`;
-                return viewMode === "board" ? `${base}&view=board` : base;
-              })();
+                const href = (() => {
+                  if (opt.key === "all") {
+                    return viewMode === "board"
+                      ? `/portal/${effectiveTenantId}/projects?view=board`
+                      : `/portal/${effectiveTenantId}/projects`;
+                  }
+                  const base = `/portal/${effectiveTenantId}/projects?status=${opt.key}`;
+                  return viewMode === "board" ? `${base}&view=board` : base;
+                })();
 
-              return (
-                <Link
-                  key={opt.key}
-                  href={href}
-                  className={[
-                    "inline-flex items-center rounded-full border px-3 py-1 transition",
-                    isActive
-                      ? "border-emerald-500 bg-emerald-500 text-white shadow-sm"
-                      : "border-border bg-background/60 text-muted-foreground hover:border-emerald-300 hover:text-emerald-700",
-                  ].join(" ")}
-                >
-                  {opt.label}
-                </Link>
-              );
-            })}
-          </div>
+                return (
+                  <Link
+                    key={opt.key}
+                    href={href}
+                    className={[
+                      "inline-flex items-center rounded-full border px-3 py-1 transition",
+                      isActive
+                        ? "border-emerald-500 bg-emerald-500 text-white shadow-sm"
+                        : "border-border bg-background/60 text-muted-foreground hover:border-emerald-300 hover:text-emerald-700",
+                    ].join(" ")}
+                  >
+                    {opt.label}
+                  </Link>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* Right: search (table) + view toggle + new project */}
@@ -310,10 +365,27 @@ export default async function ProjectsPage({
                   <div className="col-span-2 flex justify-end gap-2">
                     <Link
                       href={`/portal/${effectiveTenantId}/projects/${p.id}`}
-                      className="underline"
+                      className="inline-flex items-center text-emerald-700 hover:text-emerald-900"
+                      title="View project"
                     >
-                      Open
+                      <Eye className="h-5 w-5" />
                     </Link>
+
+                    <form action={deleteProjectAction}>
+                      <input type="hidden" name="projectId" value={p.id} />
+                      <input
+                        type="hidden"
+                        name="tenantId"
+                        value={effectiveTenantId}
+                      />
+                      <button
+                        type="submit"
+                        className="inline-flex items-center text-red-600 hover:text-red-800"
+                        title="Delete project"
+                      >
+                        <Trash2 className="h-5 w-5" />
+                      </button>
+                    </form>
                   </div>
                 </div>
               ))

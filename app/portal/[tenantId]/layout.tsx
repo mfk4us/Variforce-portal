@@ -16,6 +16,7 @@ import HomeIcon from "@mui/icons-material/Home";
 import FolderIcon from "@mui/icons-material/Folder";
 import SettingsIcon from "@mui/icons-material/Settings";
 import NotificationsIcon from "@mui/icons-material/Notifications";
+import PeopleIcon from "@mui/icons-material/People";
 
 export default function TenantPortalLayout({
   children,
@@ -49,6 +50,8 @@ export default function TenantPortalLayout({
 
   const currentSection = pathname.includes("/projects")
     ? "Projects"
+    : pathname.includes("/clients")
+    ? "Clients"
     : pathname.includes("/settings")
     ? "Settings"
     : "Dashboard";
@@ -65,6 +68,12 @@ export default function TenantPortalLayout({
       name: "Projects",
       href: `/portal/${tenantId}/projects`,
       icon: <FolderIcon fontSize="small" />,
+    },
+    {
+      key: "clients",
+      name: "Clients",
+      href: `/portal/${tenantId}/clients`,
+      icon: <PeopleIcon fontSize="small" />,
     },
     {
       key: "settings",
