@@ -44,7 +44,6 @@ import {
 import type { LucideIcon } from "lucide-react";
 import type { Database } from "@/lib/database.types";
 import type { Json } from "@/lib/database.types";
-import { ProjectFilesTab } from "./components/ProjectFilesTab";
 
 interface ProjectDetailPageProps {
   params: Promise<{
@@ -1431,7 +1430,21 @@ export default function ProjectDetailPage({ params }: ProjectDetailPageProps) {
 
             {/* Files */}
             <TabsContent value="files" className="mt-0">
-              <ProjectFilesTab tenantId={tenantId} projectId={projectId} />
+              <Card className="border-emerald-100/80 bg-white/80 shadow-sm backdrop-blur">
+                <CardHeader>
+                  <CardTitle className="text-sm font-semibold text-slate-950">
+                    Files &amp; Attachments
+                  </CardTitle>
+                  <CardDescription className="text-sm text-slate-600">
+                    Uploaded PDFs, DWGs, images, and other documents linked to this project.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50/60 p-4 text-sm text-slate-600">
+                    Future: connect to project_files table and show uploads from technicians and clients.
+                  </div>
+                </CardContent>
+              </Card>
             </TabsContent>
 
             {/* Surveys */}
