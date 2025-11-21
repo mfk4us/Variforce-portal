@@ -8,5 +8,15 @@
     "javascriptreact": "javascriptreact",
     "typescriptreact": "typescriptreact",
     "css": "css"
-  }
+  },
+  "cSpell.words": [
+    "BOCC",
+    "boqs",
+    "ilike",
+    "nums",
+    "supa",
+    "supabase",
+    "Vari",
+    "workorders"
+  ]
 }

@@ -3,7 +3,13 @@ export const runtime = "nodejs";
 import { NextResponse, type NextRequest } from "next/server";
 import otpMap from "@/lib/otpStore";
 import crypto from "crypto";
-import { getEnv } from "@/lib/env";
+
+type OtpEntry = {
+  hash: string;
+  expiresAt: number;
+  attempts: number;
+  lastSentAt: number;
+};
 
 const WA_TOKEN = process.env.WA_ACCESS_TOKEN!;
 const WA_PHONE_NUMBER_ID = process.env.WA_PHONE_NUMBER_ID!; // e.g. 636605492870899
@@ -12,7 +18,7 @@ const EXP_MINUTES = parseInt(process.env.OTP_EXP_MINUTES || "5", 10);
 const TEMPLATE_LANG = process.env.WA_TEMPLATE_LANG || "en_US";
 const TEMPLATE_URL_PLACEHOLDER = process.env.WA_TEMPLATE_URL_PLACEHOLDER === "1";
 
-async function callMeta(payload: any) {
+async function callMeta(payload: unknown) {
   const resp = await fetch(`https://graph.facebook.com/v22.0/${WA_PHONE_NUMBER_ID}/messages`, {
     method: "POST",
     headers: {
@@ -59,7 +65,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Rate limit (simple): allow once per 60s per phone
-    const existing = otpMap.get(phone) as any;
+    const existing = otpMap.get(phone) as OtpEntry | undefined;
     const now = Date.now();
     if (existing?.lastSentAt && now - existing.lastSentAt < 60_000) {
       const wait = Math.ceil((60_000 - (now - existing.lastSentAt)) / 1000);
@@ -71,7 +77,7 @@ export async function POST(req: NextRequest) {
 
     const langCode = resolveLang(bodyLang || queryLang);
 
-    const components: any[] = [
+    const components: unknown[] = [
       {
         type: "body",
         parameters: [{ type: "text", text: code }]
@@ -91,7 +97,7 @@ export async function POST(req: NextRequest) {
     const componentsToUse = components;
 
     // Build payload function for reuse
-    const buildPayload = (comps: any[]) => ({
+    const buildPayload = (comps: unknown[]) => ({
       messaging_product: "whatsapp",
       to: phone,
       type: "template",
@@ -143,10 +149,11 @@ export async function POST(req: NextRequest) {
       expiresAt: now + EXP_MINUTES * 60_000,
       attempts: 0,
       lastSentAt: now
-    } as any);
+    } as OtpEntry);
 
     return NextResponse.json({ ok: true, resend_in: 60, message_id: json?.messages?.[0]?.id });
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message || "failed" }, { status: 500 });
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : "failed";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

@@ -1,5 +1,5 @@
 import { createClient as createServiceClient } from "@supabase/supabase-js";
-import { revalidatePath } from "next/navigation";
+import { revalidatePath } from "next/cache";
 
 function slugify(s: string) {
   return s.toLowerCase().replace(/['"]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
@@ -59,7 +59,7 @@ export async function approveApplication(appId: string, adminUserId?: string) {
       primary_contact_name: app.contact_name ?? null,
       primary_contact_email: app.email ?? null,
 
-      -- Compliance (if files already uploaded externally, put URLs now; otherwise let them upload to bucket)
+      // Compliance (if files already uploaded externally, put URLs now; otherwise let them upload to bucket)
       cr_number: app.cr_number ?? null,
       vat_number: app.vat_number ?? null,
       cr_doc_url: app.cr_path ?? null,

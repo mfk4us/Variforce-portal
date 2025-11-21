@@ -1,6 +1,11 @@
 "use client";
 import { useEffect } from "react";
-import { supabase } from "@/lib/supabase/client";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
+
+const supabase = createSupabaseClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+);
 
 export default function LogoutPage() {
   useEffect(() => {

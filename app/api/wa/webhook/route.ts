@@ -1,7 +1,6 @@
 export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
-import { env } from "@/lib/env";
 
 const VERIFY_TOKEN = process.env.WEBHOOK_VERIFY_TOKEN || "dev-verify-token";
 
@@ -18,7 +17,7 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const body = await req.json().catch(() => ({} as any));
+  const body = await req.json().catch(() => ({} as Record<string, unknown>));
 
   if (!body || Object.keys(body).length === 0) {
     console.warn("WA WEBHOOK EVENT: empty body");

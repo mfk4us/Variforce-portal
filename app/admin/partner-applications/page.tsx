@@ -6,7 +6,7 @@ import { createClient } from "@supabase/supabase-js";
 import { redirect } from "next/navigation";
 import Script from "next/script";
 import { Button, Input, Badge, Card, CardContent } from "@/components/ui";
-import crypto from "node:crypto";
+
 
 // Helpers for slug generation
 function slugify(s: string) {
@@ -116,22 +116,8 @@ async function createTenantAndInviteForApp(app: {
 
   let actionLink: string | undefined;
   if (app.email) {
-    // Send invite email
-    const { error: inviteErr } = await (supabase as any).auth.admin.inviteUserByEmail(app.email, {
-      redirectTo: `${base}/portal/login`,
-      data: {
-        full_name: `${app.company_name} Manager`,
-        default_tenant_id: tenant.id,
-        role: "company_manager",
-      },
-    });
-    if (inviteErr) {
-      console.warn("inviteUserByEmail failed, will still try to generate link:", inviteErr?.message || inviteErr);
-    }
-
-    // Generate a signup link with same metadata so we can show Copy Link in UI
-    const { data: linkData, error: linkGenErr } = await (supabase as any).auth.admin.generateLink({
-      type: "signup",
+    const { data: linkData, error: linkGenErr } = await supabase.auth.admin.generateLink({
+      type: "invite",
       email: app.email,
       options: {
         redirectTo: `${base}/portal/login`,
@@ -142,8 +128,9 @@ async function createTenantAndInviteForApp(app: {
         },
       },
     });
-    if (!linkGenErr) {
-      actionLink = (linkData?.action_link || linkData?.properties?.action_link) as string | undefined;
+
+    if (!linkGenErr && linkData) {
+      actionLink = linkData.properties?.action_link ?? undefined;
     }
   }
 
@@ -200,13 +187,20 @@ export async function decideAction(formData: FormData) {
       if (appRow.phone) params.set("phone", appRow.phone);
       if (appRow.email) params.set("email", appRow.email);
       redirect(`/admin/partner-applications?${params.toString()}`);
-    } catch (e: any) {
-      const msg = e?.message || "invite_error";
-      const params = new URLSearchParams();
-      params.set("status", "approved");
-      params.set("error", msg);
-      redirect(`/admin/partner-applications?${params.toString()}`);
-    }
+    } catch (e: unknown) {
+  const msg =
+    e &&
+    typeof e === "object" &&
+    "message" in e &&
+    typeof (e as { message: unknown }).message === "string"
+      ? (e as { message: string }).message
+      : "invite_error";
+
+  const params = new URLSearchParams();
+  params.set("status", "approved");
+  params.set("error", msg);
+  redirect(`/admin/partner-applications?${params.toString()}`);
+}
   }
 }
 
@@ -239,6 +233,9 @@ export default async function AdminPartnersApplicationsPage({
     status?: Row["status"] | "all" | string | string[];
     sort?: string | string[];
     dir?: string | string[];
+    invite?: string | string[];
+    phone?: string | string[];
+    email?: string | string[];
   }>;
 }) {
   const sp = ((await searchParams) ?? {}) as {
@@ -246,6 +243,9 @@ export default async function AdminPartnersApplicationsPage({
     status?: Row["status"] | "all" | string | string[];
     sort?: string | string[];
     dir?: string | string[];
+    invite?: string | string[];
+    phone?: string | string[];
+    email?: string | string[];
   };
 
   // Normalize searchParams
@@ -253,45 +253,39 @@ export default async function AdminPartnersApplicationsPage({
   const rawStatus = Array.isArray(sp.status) ? sp.status[0] : sp.status;
   const q = (rawQ || "").toString().trim();
 
-  const allowed: Array<Row["status"] | "all"> = [
+  const allowedStatuses: Array<Row["status"] | "all"> = [
     "all",
     "pending",
     "approved",
     "rejected",
   ];
-  const norm = (rawStatus || "all").toString().toLowerCase();
-  const status: Row["status"] | "all" = allowed.includes(norm as any)
-    ? (norm as any)
-    : "all";
+
+  const normStatus = (rawStatus || "all").toString().toLowerCase() as Row["status"] | "all";
+
+  const status: Row["status"] | "all" =
+    allowedStatuses.includes(normStatus) ? normStatus : "all";
 
   const rawSort = Array.isArray(sp.sort) ? sp.sort[0] : sp.sort;
   const rawDir = Array.isArray(sp.dir) ? sp.dir[0] : sp.dir;
 
   const allowedSorts = ["company", "phone", "status", "submitted_at"] as const;
   const sortKey = (rawSort || "submitted_at").toString().toLowerCase();
-  const sort: (typeof allowedSorts)[number] = (
-    allowedSorts as readonly string[]
-  ).includes(sortKey)
-    ? (sortKey as any)
-    : "submitted_at";
+
+  const sort: (typeof allowedSorts)[number] = ((allowedSorts as readonly string[]).includes(sortKey)
+    ? sortKey
+    : "submitted_at") as (typeof allowedSorts)[number];
 
   const dirKey = (rawDir || (sort === "submitted_at" ? "desc" : "asc"))
     .toString()
     .toLowerCase();
+
   const dir: "asc" | "desc" = dirKey === "desc" ? "desc" : "asc";
 
-  const rawInvite = Array.isArray((sp as any).invite)
-    ? (sp as any).invite[0]
-    : (sp as any).invite;
-  const rawPhone = Array.isArray((sp as any).phone)
-    ? (sp as any).phone[0]
-    : (sp as any).phone;
-  const inviteUrl = rawInvite ? decodeURIComponent(String(rawInvite)) : "";
-  const invitePhone = rawPhone ? String(rawPhone) : "";
-  const rawEmail = Array.isArray((sp as any).email)
-    ? (sp as any).email[0]
-    : (sp as any).email;
-  const inviteEmail = rawEmail ? String(rawEmail) : "";
+const rawInvite = Array.isArray(sp.invite) ? sp.invite[0] : sp.invite;
+const rawEmail = Array.isArray(sp.email) ? sp.email[0] : sp.email;
+
+const inviteUrl = rawInvite ? decodeURIComponent(String(rawInvite)) : "";
+const inviteEmail = rawEmail ? String(rawEmail) : "";
 
   // Query Supabase
   const supabase = adminClient();
@@ -538,12 +532,14 @@ export default async function AdminPartnersApplicationsPage({
               <div className="text-sm">{r.phone || "—"}</div>
               <div>
                 {(() => {
-                  const map = {
+                  const map: Record<Row["status"], string> = {
                     pending: "bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200",
                     approved: "bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200",
                     rejected: "bg-rose-50 text-rose-800 dark:bg-rose-900/30 dark:text-rose-200",
-                  } as const;
-                  const cls = (map as any)[r.status] || "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200";
+                  };
+                  const cls =
+                    map[r.status] ||
+                    "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200";
                   return (
                     <Badge variant="secondary" className={`capitalize ${cls} ring-1 ring-emerald-500/15`}>
                       {r.status}

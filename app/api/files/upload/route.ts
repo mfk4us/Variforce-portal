@@ -32,7 +32,8 @@ export async function POST(req: Request) {
 
     // (optional) persist a DB row in project_files table later; for now return the URL
     return NextResponse.json({ ok: true, path, url: signed.signedUrl })
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? 'upload failed' }, { status: 500 })
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : 'upload failed';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

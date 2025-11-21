@@ -7,6 +7,8 @@ import {
   createServerClient as _createServerClient,
 } from "@supabase/ssr";
 
+type CookieOptions = Record<string, unknown>;
+
 // ---- Browser client (RLS, uses anon key) ----
 export function createBrowserClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL as string;
@@ -24,8 +26,8 @@ export function createBrowserClient() {
 export function createServerClientRLS(cookieStore: {
   get: (name: string) => { name: string; value: string } | undefined;
   getAll?: () => { name: string; value: string }[];
-  set: (name: string, value: string, options?: any) => void;
-  setAll?: (cookies: { name: string; value: string; options?: any }[]) => void;
+  set: (name: string, value: string, options?: CookieOptions) => void;
+  setAll?: (cookies: { name: string; value: string; options?: CookieOptions }[]) => void;
 }) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL as string;
   const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY as string;
@@ -35,15 +37,15 @@ export function createServerClientRLS(cookieStore: {
     get(name: string) {
       return cookieStore.get(name)?.value;
     },
-    set(name: string, value: string, options: any) {
+    set(name: string, value: string, options?: CookieOptions) {
       cookieStore.set(name, value, options);
     },
     getAll() {
-      const all = (cookieStore.getAll ? cookieStore.getAll() : []) as any[];
+      const all: { name: string; value: string }[] = cookieStore.getAll ? cookieStore.getAll() : [];
       return all.map((c) => ({ name: c.name, value: c.value }));
     },
-    setAll(_cookies: { name: string; value: string; options?: any }[]) {
-      if (cookieStore.setAll) cookieStore.setAll(_cookies as any);
+    setAll(_cookies: { name: string; value: string; options?: CookieOptions }[]) {
+      if (cookieStore.setAll) cookieStore.setAll(_cookies);
       else _cookies.forEach((c) => cookieStore.set(c.name, c.value, c.options));
     },
   };

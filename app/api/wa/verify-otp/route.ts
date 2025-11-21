@@ -19,8 +19,9 @@ function isValidPhone(e164NoPlus: string): boolean {
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json().catch(() => ({} as any));
-    const phone = normalizePhone(body?.phone);
+    const body = (await req.json().catch(() => ({} as Record<string, unknown>))) as Record<string, unknown>;
+    const rawPhone = typeof body.phone === "string" ? body.phone : undefined;
+    const phone = normalizePhone(rawPhone);
     const code = String(body?.code || "").replace(/\D/g, "").slice(0, 6);
 
     if (!phone || !isValidPhone(phone) || !/^\d{6}$/.test(code)) {
@@ -30,7 +31,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const rec = otpMap.get(phone) as any;
+    const rec = otpMap.get(phone) as { hash: string; expiresAt: number; attempts: number } | undefined;
     if (!rec) {
       console.warn("VERIFY OTP: no record for phone", phone);
       return NextResponse.json({ error: "no_otp_requested" }, { status: 404 });
@@ -85,8 +86,9 @@ export async function POST(req: Request) {
     });
     console.log("VERIFY OTP: success for", phone);
     return res;
-  } catch (e: any) {
-    console.error("VERIFY OTP ERROR:", e?.message || e);
-    return NextResponse.json({ error: "server_error", message: e?.message || "failed" }, { status: 500 });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("VERIFY OTP ERROR:", msg);
+    return NextResponse.json({ error: "server_error", message: msg }, { status: 500 });
   }
 }

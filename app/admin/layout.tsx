@@ -1,6 +1,9 @@
 // app/admin/layout.tsx
-"use client";
 
+"use client";
+// cspell:ignore shadcn
+
+import React, { useState, useEffect } from "react";
 import type { ReactNode } from "react";
 import Link from "next/link";
 import Image from "next/image";
@@ -67,21 +70,21 @@ function getInitialTheme(): "light" | "dark" {
 }
 
 function LocalThemeToggle() {
-  const [mounted, setMounted] = (require("react") as typeof import("react")).useState(false);
-  const [theme, setTheme] = (require("react") as typeof import("react")).useState<"light" | "dark">("light");
-  const React = require("react") as typeof import("react");
+  const [theme, setTheme] = useState<"light" | "dark">(() => {
+    if (typeof window === "undefined") return "light";
+    return getInitialTheme();
+  });
 
-  React.useEffect(() => {
-    const t = getInitialTheme();
-    setTheme(t);
-    applyThemeClass(t);
-    setMounted(true);
-  }, []);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    applyThemeClass(theme);
+    try {
+      localStorage.setItem("vf_theme", theme);
+    } catch {}
+  }, [theme]);
 
   const setAndApply = (t: "light" | "dark") => {
     setTheme(t);
-    try { localStorage.setItem("vf_theme", t); } catch {}
-    applyThemeClass(t);
   };
 
   const icon = theme === "dark" ? (
@@ -89,14 +92,6 @@ function LocalThemeToggle() {
   ) : (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
   );
-
-  if (!mounted) {
-    return (
-      <Button variant="outline" size="icon" aria-label="Theme" disabled>
-        {icon}
-      </Button>
-    );
-  }
 
   return (
     <DropdownMenu>
@@ -137,10 +132,6 @@ const NAV: { href: string; label: string; icon: LucideIcon }[] = [
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-
-  const React = require("react") as typeof import("react");
-  const [mounted, setMounted] = React.useState(false);
-  React.useEffect(() => setMounted(true), []);
 
   // Don't wrap the login page at /admin in the admin shell.
   if (pathname === "/admin") return <>{children}</>;
@@ -198,43 +189,41 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
           <header className="sticky top-0 z-40 border-b bg-background/80 backdrop-blur" suppressHydrationWarning>
             <div className="flex h-14 items-center gap-2 px-3">
               {/* Mobile: open sidebar */}
-              {mounted && (
-                <Sheet>
-                  <SheetTrigger asChild className="lg:hidden">
-                    <Button variant="outline" size="icon" aria-label="Open menu">
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
-                    </Button>
-                  </SheetTrigger>
-                  <SheetContent side="left" className="p-0 w-[240px]">
-                    <div className="flex items-center gap-3 p-4">
-                      <Image src="/logo.png" alt="BOCC" width={28} height={28} className="rounded-full" />
-                      <div className="text-sm font-extrabold tracking-tight">VariForce Admin</div>
-                    </div>
-                    <Separator />
-                    <nav className="p-3 space-y-1">
-                      {NAV.map((item) => {
-                        const active = pathname === item.href || pathname.startsWith(item.href + "/");
-                        return (
-                          <Button
-                            key={item.href}
-                            asChild
-                            variant={active ? "secondary" : "ghost"}
-                            className="w-full justify-between rounded-full"
-                          >
-                            <Link href={item.href} className="flex w-full items-center justify-between">
-                              <span className="inline-flex items-center gap-2">
-                                <item.icon className="h-4 w-4" aria-hidden />
-                                {item.label}
-                              </span>
-                              {active && <span className="ml-2 h-2 w-2 rounded-full bg-emerald-500" />}
-                            </Link>
-                          </Button>
-                        );
-                      })}
-                    </nav>
-                  </SheetContent>
-                </Sheet>
-              )}
+              <Sheet>
+                <SheetTrigger asChild className="lg:hidden">
+                  <Button variant="outline" size="icon" aria-label="Open menu">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+                  </Button>
+                </SheetTrigger>
+                <SheetContent side="left" className="p-0 w-[240px]">
+                  <div className="flex items-center gap-3 p-4">
+                    <Image src="/logo.png" alt="BOCC" width={28} height={28} className="rounded-full" />
+                    <div className="text-sm font-extrabold tracking-tight">VariForce Admin</div>
+                  </div>
+                  <Separator />
+                  <nav className="p-3 space-y-1">
+                    {NAV.map((item) => {
+                      const active = pathname === item.href || pathname.startsWith(item.href + "/");
+                      return (
+                        <Button
+                          key={item.href}
+                          asChild
+                          variant={active ? "secondary" : "ghost"}
+                          className="w-full justify-between rounded-full"
+                        >
+                          <Link href={item.href} className="flex w-full items-center justify-between">
+                            <span className="inline-flex items-center gap-2">
+                              <item.icon className="h-4 w-4" aria-hidden />
+                              {item.label}
+                            </span>
+                            {active && <span className="ml-2 h-2 w-2 rounded-full bg-emerald-500" />}
+                          </Link>
+                        </Button>
+                      );
+                    })}
+                  </nav>
+                </SheetContent>
+              </Sheet>
 
               {/* Breadcrumbs + title */}
               <div className="flex min-w-0 items-center gap-3">
@@ -264,42 +253,38 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                 <LocalThemeToggle />
 
                 {/* Notifications */}
-                {mounted && (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="outline" size="icon" aria-label="Notifications">
-                        🔔
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-64">
-                      <DropdownMenuLabel>Notifications</DropdownMenuLabel>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem className="text-muted-foreground">All clear — no new notifications.</DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                )}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="icon" aria-label="Notifications">
+                      🔔
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-64">
+                    <DropdownMenuLabel>Notifications</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem className="text-muted-foreground">All clear — no new notifications.</DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
 
                 {/* Account */}
-                {mounted && (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" className="gap-2 px-2">
-                        <Avatar className="h-6 w-6">
-                          <AvatarFallback>A</AvatarFallback>
-                        </Avatar>
-                        <span className="hidden sm:inline text-sm">Admin</span>
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-56">
-                      <DropdownMenuLabel>Signed in as</DropdownMenuLabel>
-                      <DropdownMenuItem className="text-muted-foreground">admin@bocc.sa</DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem asChild>
-                        <Link href="/admin/logout" className="text-red-600">Log out</Link>
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                )}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" className="gap-2 px-2">
+                      <Avatar className="h-6 w-6">
+                        <AvatarFallback>A</AvatarFallback>
+                      </Avatar>
+                      <span className="hidden sm:inline text-sm">Admin</span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-56">
+                    <DropdownMenuLabel>Signed in as</DropdownMenuLabel>
+                    <DropdownMenuItem className="text-muted-foreground">admin@bocc.sa</DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem asChild>
+                      <Link href="/admin/logout" className="text-red-600">Log out</Link>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
             </div>
           </header>

@@ -9,7 +9,6 @@ export async function POST(req: Request) {
     const phoneId = process.env.WHATSAPP_PHONE_ID || process.env.WA_PHONE_NUMBER_ID;
     const template = process.env.WA_TEMPLATE_NAME || "partner_login_auth";
     const lang = process.env.WA_TEMPLATE_LANG || "en_US";
-    const urlIndex = Number(process.env.WA_TEMPLATE_URL_PLACEHOLDER || 1);
 
     const waRes = await fetch(
       `https://graph.facebook.com/v19.0/${phoneId}/messages`,
@@ -42,7 +41,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: json?.error || "WA send failed" }, { status: 400 });
     }
     return NextResponse.json({ ok: true, id: json.messages?.[0]?.id });
-  } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e.message }, { status: 500 });
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : 'Unknown error';
+    return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
 }

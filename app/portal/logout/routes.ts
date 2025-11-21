@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server'
-import { createServiceClient } from '@/lib/supabase/server'
 
 export async function GET() {
   // Client should also call supabase.auth.signOut(), but this clears server cookies too if you set any later.

@@ -5,7 +5,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { Kelly_Slab } from "next/font/google";
 import { Zap } from "lucide-react";
 import { createBrowserClient as _createBrowserClient } from "@supabase/ssr";
@@ -20,9 +21,8 @@ function createSupabase() {
 }
 
 export default function AdminLoginPage() {
-  const router = useRouter();
   const params = useSearchParams();
-  const supabase = useMemo(createSupabase, []);
+  const supabase = useMemo(() => createSupabase(), []);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [err, setErr] = useState<string | null>(null);
@@ -55,8 +55,8 @@ export default function AdminLoginPage() {
       // Try to go to admin dashboard directly
       const next = params.get("next");
       window.location.href = next || "/admin/dashboard";
-    } catch (e: any) {
-      setErr(e?.message || "Something went wrong. Please try again.");
+    } catch (e: unknown) {
+      setErr((e as unknown as { message?: string })?.message || "Something went wrong. Please try again.");
       setLoading(false);
     }
   }
@@ -153,9 +153,9 @@ export default function AdminLoginPage() {
         {/* Helper links */}
         <div className="mt-3 text-center text-xs text-slate-500 dark:text-slate-400">
           Not an internal user?{" "}
-          <a href="/portal/login" className="text-emerald-600 hover:underline">
+          <Link href="/portal/login" className="text-emerald-600 hover:underline">
             Go to Client Portal
-          </a>
+          </Link>
         </div>
       </div>
       <style jsx global>{`

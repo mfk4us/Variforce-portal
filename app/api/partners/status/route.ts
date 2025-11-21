@@ -10,7 +10,7 @@ function normalizeKsaPhone(raw: string): string {
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json().catch(() => ({} as any));
+    const body = await req.json().catch(() => ({} as Record<string, unknown>));
     const rawPhone = body.phone || "";
     const phone = normalizeKsaPhone(rawPhone);
 
@@ -41,8 +41,8 @@ export async function POST(req: Request) {
       status: data.status,
       reviewed_at: data.reviewed_at,
     });
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message || "Unknown error" }, { status: 500 });
+  } catch (e: unknown) {
+    return NextResponse.json({ error: e instanceof Error ? e.message : "Unknown error" }, { status: 500 });
   }
 }
 

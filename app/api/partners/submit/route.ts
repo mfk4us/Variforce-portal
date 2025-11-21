@@ -55,7 +55,7 @@ export async function POST(req: Request) {
     async function upload(kind: "cr" | "vat", file: File | null, idDigits: string | null) {
       if (!file) return null;
       // Accept Safari case where file.type may be empty but name ends with .pdf
-      const filename = (file as any)?.name || "";
+      const filename = (file && "name" in file ? file.name : "") as string;
       const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(filename);
       if (!isPdf) throw new Error(`${kind.toUpperCase()} must be a PDF`);
       const bytes = new Uint8Array(await file.arrayBuffer());
@@ -101,10 +101,10 @@ export async function POST(req: Request) {
     if (error) throw new Error(error.message);
 
     return NextResponse.json({ ok: true, row: data?.[0] ?? null });
-  } catch (err: any) {
-    console.error("/api/partners/submit error:", err?.message || err);
+  } catch (err: unknown) {
+    console.error("/api/partners/submit error:", (err as Error)?.message || String(err));
     return NextResponse.json(
-      { error: err?.message || "Failed to submit application" },
+      { error: (err as Error)?.message || "Failed to submit application" },
       { status: 500 }
     );
   }
@@ -144,10 +144,10 @@ export async function GET(req: Request) {
 
     // Any other status -> treat as pending unless you add more states later
     return NextResponse.json({ status: String(row.status || "pending") });
-  } catch (err: any) {
-    console.error("/api/partners/submit GET error:", err?.message || err);
+  } catch (err: unknown) {
+    console.error("/api/partners/submit GET error:", (err as Error)?.message || String(err));
     return NextResponse.json(
-      { error: err?.message || "Failed to check status" },
+      { error: (err as Error)?.message || "Failed to check status" },
       { status: 500 }
     );
   }

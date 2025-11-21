@@ -1,5 +1,7 @@
 // REPLACED CONTENT
+
 "use client";
+/* eslint-disable react/no-unescaped-entities */
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
@@ -40,6 +42,8 @@ import {
 } from "lucide-react";
 
 import type { LucideIcon } from "lucide-react";
+import type { Database } from "@/lib/database.types";
+import type { Json } from "@/lib/database.types";
 
 interface ProjectDetailPageProps {
   params: Promise<{
@@ -100,6 +104,12 @@ type ProjectEndClientRecord = {
   end_client_id: string;
 };
 
+type ActivityLogMeta = {
+  from?: string;
+  to?: string;
+  [key: string]: unknown;
+};
+
 type ActivityLogRow = {
   id: string;
   actor_member_id: string | null;
@@ -107,7 +117,7 @@ type ActivityLogRow = {
   entity: string | null;
   entity_id: string | null;
   action: string;
-  meta_json: any;
+  meta_json: ActivityLogMeta | null;
   created_at: string;
 };
 
@@ -185,8 +195,9 @@ function getNextStageConfig(stage: ProjectStage): { id: ProjectStage; ctaLabel: 
 
 function formatActivityMessage(item: ActivityLogRow): string {
   if (item.action === "stage_changed") {
-    const from = item.meta_json?.from ?? "";
-    const to = item.meta_json?.to ?? "";
+    const meta: ActivityLogMeta = item.meta_json ?? {};
+    const from = meta.from ?? "";
+    const to = meta.to ?? "";
     return `Stage changed from ${from} to ${to}`;
   }
 
@@ -396,7 +407,9 @@ export default function ProjectDetailPage({ params }: ProjectDetailPageProps) {
 
       const { data, error } = await supabase
         .from("projects")
-        .update({ status: stageId })
+        .update({
+          status: stageId as Database["public"]["Tables"]["projects"]["Row"]["status"],
+        })
         .eq("id", project.id)
         .select(
           "id,name,description,status,tenant_id,created_at,updated_at"
@@ -423,7 +436,7 @@ export default function ProjectDetailPage({ params }: ProjectDetailPageProps) {
                 entity: "project",
                 entity_id: data.id,
                 action: "stage_changed",
-                meta_json: { from: previousStage, to: stageId },
+                meta_json: { from: previousStage, to: stageId } as unknown as Json,
               },
             ])
             .select(
@@ -480,8 +493,8 @@ export default function ProjectDetailPage({ params }: ProjectDetailPageProps) {
       const { data, error } = await supabase
         .from("projects")
         .update({
-          name: editName.trim() || null,
-          description: editDescription.trim() || null,
+          name: editName.trim() || undefined,
+          description: editDescription.trim() || undefined,
         })
         .eq("id", project.id)
         .select(
@@ -563,7 +576,7 @@ export default function ProjectDetailPage({ params }: ProjectDetailPageProps) {
 
         // Log project update in activity_log
         try {
-          const inserts: any[] = [
+          const inserts = [
             {
               actor_member_id: null,
               project_id: data.id,
@@ -571,9 +584,15 @@ export default function ProjectDetailPage({ params }: ProjectDetailPageProps) {
               entity_id: data.id,
               action: "project_updated",
               meta_json: {
-                name: { from: oldName, to: data.name },
-                description: { from: oldDescription, to: data.description },
-              },
+                name: {
+                  from: oldName,
+                  to: data.name,
+                },
+                description: {
+                  from: oldDescription,
+                  to: data.description,
+                },
+              } as unknown as Json,
             },
           ];
 
@@ -587,7 +606,7 @@ export default function ProjectDetailPage({ params }: ProjectDetailPageProps) {
               meta_json: {
                 from: oldClientId,
                 to: newClientId,
-              },
+              } as unknown as Json,
             });
           }
 

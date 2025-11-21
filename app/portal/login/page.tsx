@@ -1,8 +1,8 @@
-// @ts-nocheck
 "use client";
 
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { createBrowserClient } from "@/lib/supabase/client";
 import { Zap, Mail, Lock, Eye, EyeOff } from "lucide-react";
 import { Kelly_Slab } from "next/font/google";
@@ -12,7 +12,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 async function waitForSession(sb: ReturnType<typeof createBrowserClient>, timeoutMs = 2000) {
   const start = Date.now();
   // quick attempt
-  let { data } = await sb.auth.getSession();
+  const { data } = await sb.auth.getSession();
   if (data?.session) return data.session;
   // subscribe + light polling (covers most cases)
   const { data: sub } = sb.auth.onAuthStateChange((_evt, session) => {
@@ -26,7 +26,7 @@ async function waitForSession(sb: ReturnType<typeof createBrowserClient>, timeou
       const { data: d2 } = await sb.auth.getSession();
       if (d2?.session) return d2.session;
     }
-    return null as any;
+    return null;
   } finally {
     try { sub.subscription.unsubscribe(); } catch {}
   }
@@ -54,21 +54,40 @@ function Modal({ open, onClose, title, children, actions }: { open: boolean; onC
   )
 }
 
-function BreathingBolt() {
-  return (
-    <span className="relative inline-flex items-center">
-      <span className="absolute inset-0 rounded-full bg-emerald-500/30 blur-xl animate-breathe" />
-      <Zap className="relative w-10 h-10 text-emerald-400 drop-shadow-[0_0_18px_rgba(16,185,129,0.85)] animate-breathe" />
-    </span>
-  );
-}
 
 
 type Lang = "en" | "ar" | "ur" | "hi" | "ml" | "bn";
 
+type UserMetaWithTenant = {
+  default_tenant_id?: string;
+  default_tenant?: string;
+};
+
+interface Messages {
+  back: string;
+  title: string;
+  subtitle: string;
+  haveNoAccount: string;
+  tagline: string;
+  support1: string;
+  support2: string;
+  email: string;
+  password: string;
+  signIn: string;
+  signingIn: string;
+  emailRequired: string;
+  passwordRequired: string;
+  forgotPassword: string;
+  loginFailed: string;
+  accountInactiveTitle: string;
+  accountInactiveBody: string;
+  contactSupport: string;
+  close: string;
+}
+
 
 // Lightweight i18n (aligned with signup page)
-const i18n: Record<Lang | "zh", any> = {
+const i18n: Record<Lang | "zh", Partial<Messages>> = {
   en: {
     back: "← Back to website",
     title: "Sign in to VariForce Workspace",
@@ -177,10 +196,8 @@ export default function LoginPage() {
         if (!user) return;
 
         // Prefer default tenant from metadata
-        let tenantId: string | null =
-          (user?.user_metadata as any)?.default_tenant_id ??
-          (user?.user_metadata as any)?.default_tenant ??
-          null;
+        const meta = (user?.user_metadata ?? {}) as UserMetaWithTenant;
+        let tenantId: string | null = meta.default_tenant_id ?? meta.default_tenant ?? null;
 
         // Fallback: oldest ACTIVE membership
         if (!tenantId) {
@@ -252,73 +269,13 @@ export default function LoginPage() {
       }
     })();
     return () => { alive = false; };
-  }, [resolveAndRoute]);
+  }, [resolveAndRoute, sb]);
 
-  async function routeAfterAuth(accessToken: string) {
-    // Resolve membership and route accordingly (no admin redirect here)
-    try {
-      const { data: u } = await sb.auth.getUser();
-      const user = u?.user;
-      if (!user) return;
-
-      // Prefer default tenant from auth metadata
-      let tenantId: string | null =
-        (user?.user_metadata as any)?.default_tenant_id ??
-        (user?.user_metadata as any)?.default_tenant ??
-        null;
-
-      // Fallback: earliest active membership
-      if (!tenantId && user?.id) {
-        const { data: memberships, error: mErr } = await sb
-          .from("members")
-          .select("tenant_id, status, created_at")
-          .eq("user_id", user.id)
-          .eq("status", "active")
-          .order("created_at", { ascending: true });
-
-        console.log("[login] memberships RLS data:", memberships, "error:", mErr);
-
-        if (mErr) {
-          console.warn("[login] members lookup RLS error:", mErr);
-        }
-
-        if (memberships && memberships.length > 0) {
-          tenantId = memberships[0].tenant_id as string | null;
-        }
-      }
-
-      // This portal is for tenant users only; BOCC staff must use /admin/login
-      if (!tenantId) {
-        setErr("This portal is for customers/tenants. BOCC staff should sign in at /admin/login.");
-        try { await sb.auth.signOut(); } catch {}
-        return;
-      }
-
-      // Read tenant status via RLS and route to activation if pending
-      const { data: t, error: tErr } = await sb
-        .from("tenants")
-        .select("id, status")
-        .eq("id", tenantId)
-        .maybeSingle();
-
-      // Persist tenant hint for subsequent navigation
-      try { localStorage.setItem("vf_tenant", tenantId); } catch {}
-      document.cookie = `vf_tenant=${encodeURIComponent(tenantId)}; Path=/; Max-Age=${60 * 60 * 24 * 30}; SameSite=Lax`;
-
-      if (tErr || !t || t.status === "pending") {
-        router.replace(`/portal/${tenantId}/activation`);
-        return;
-      }
-
-      // Default route for active tenants
-      router.replace(`/portal/${tenantId}/dashboard`);
-    } catch (routeErr) {
-      console.warn("routeAfterAuth failed:", routeErr);
-      router.replace("/portal");
-    }
-  }
-
-  const t = (k: keyof typeof i18n["en"]) => (i18n[lang] as any)[k] ?? (i18n.en as any)[k] ?? k;
+  const t = (key: keyof Messages): string => {
+    const langTable = i18n[lang] || {};
+    const value = langTable[key] ?? i18n.en[key];
+    return value ?? key;
+  };
   const isRTL = lang === "ar" || lang === "ur";
   const dir = isRTL ? "rtl" : "ltr";
   const cardOrderCls = isRTL ? "md:order-1" : "md:order-2";
@@ -350,8 +307,12 @@ export default function LoginPage() {
       // Ensure fresh JWT/session is attached before RLS queries
       await waitForSession(sb, 2000);
       await resolveAndRoute(true /* fromAttempt */, 5);
-    } catch (e: any) {
-      setErr(e?.message || t("loginFailed"));
+    } catch (e: unknown) {
+      if (e instanceof Error) {
+        setErr(e.message || t("loginFailed"));
+      } else {
+        setErr(t("loginFailed"));
+      }
     } finally {
       setLoading(false);
     }
@@ -444,7 +405,7 @@ export default function LoginPage() {
                   <h1 className="text-xl sm:text-2xl font-semibold text-gray-900">
                     {lang === "ar" ? (
                       <span className="relative inline-block">
-                        {i18n.ar.title.split("VariForce")[0]}
+                        {((i18n.ar?.title as string | undefined) ?? "").split("VariForce")[0]}
                         <span className={`${kellySlab.className} tracking-tight mx-1 text-slate-900 relative inline-block`}>
                           VariForce
                           <span className="pointer-events-none absolute -top-2 -left-3">
@@ -541,18 +502,18 @@ export default function LoginPage() {
                       </button>
                       {msg && (
                         <div className="mt-2 text-right">
-                          <a
+                          <Link
                             href="/portal"
                             className="text-sm text-emerald-700 hover:text-emerald-900 underline underline-offset-4"
                           >
                             Go to dashboard
-                          </a>
+                          </Link>
                         </div>
                       )}
                       <p className="mt-3 text-sm text-gray-700">
-                        <a href="/portal/signup" className="underline hover:text-emerald-700">
+                        <Link href="/portal/signup" className="underline hover:text-emerald-700">
                           {t("haveNoAccount")}
-                        </a>
+                        </Link>
                       </p>
                     </div>
                   </div>

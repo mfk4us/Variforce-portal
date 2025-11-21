@@ -10,21 +10,28 @@ function supabaseFromReq(req: NextRequest, res: NextResponse) {
       get(name: string) {
         return req.cookies.get(name)?.value;
       },
-      set(name: string, value: string, options: any) {
+      set(name: string, value: string, options: Record<string, unknown> = {}) {
         res.cookies.set({ name, value, ...options });
       },
-      remove(name: string, options: any) {
+      remove(name: string, options: Record<string, unknown> = {}) {
         res.cookies.set({ name, value: "", ...options, expires: new Date(0) });
       },
     },
   });
 }
 
+
 const NOINDEX_PREFIXES = ["/admin", "/portal", "/dashboard", "/api", "/settings"] as const;
 
-export default async function middleware(req: NextRequest) {
+type UserMetadata = {
+  bocc_internal?: boolean;
+  default_tenant_id?: string;
+  default_tenant?: string;
+};
+
+export async function proxy(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
-  let res = NextResponse.next();
+  const res = NextResponse.next();
 
   // --- 1) Global noindex for private paths ---
   if (NOINDEX_PREFIXES.some((p) => pathname.startsWith(p))) {
@@ -46,7 +53,7 @@ export default async function middleware(req: NextRequest) {
     } = await sb.auth.getUser();
 
     // Fallback: treat as internal if user metadata flag is set or email domain matches BOCC
-    const meta = (user?.user_metadata || {}) as any;
+    const meta = (user?.user_metadata || {}) as UserMetadata;
     const email = user?.email || "";
     const domain = email.includes("@") ? email.split("@")[1] : "";
     const metaInternal =
@@ -62,7 +69,7 @@ export default async function middleware(req: NextRequest) {
     }
 
     // Check BOCC‑internal membership (tenant_id IS NULL) + allowed roles
-    const { data: internal, error } = await sb
+    const { data: internal } = await sb
       .from("members")
       .select("role, tenant_id, status")
       .is("tenant_id", null)
@@ -70,10 +77,10 @@ export default async function middleware(req: NextRequest) {
       .eq("status", "active")
       .limit(1);
 
+    const internalRole = internal?.[0]?.role as string | undefined;
     const ok =
       metaInternal ||
-      (!!internal?.length &&
-        ["admin", "team_member"].includes(internal[0].role as any));
+      (internalRole === "admin" || internalRole === "team_member");
 
     if (!ok) {
       const url = new URL("/admin", req.url);
@@ -117,16 +124,18 @@ export default async function middleware(req: NextRequest) {
     .eq("status", "active")
     .limit(1);
 
-  const meta2 = (user?.user_metadata || {}) as any;
+  const meta2 = (user?.user_metadata || {}) as UserMetadata;
   const email2 = user?.email || "";
   const domain2 = email2.includes("@") ? email2.split("@")[1] : "";
   const metaInternal2 =
     meta2?.bocc_internal === true ||
     ["bocc.sa", "variforce.sa"].includes(domain2);
 
+  const portalInternalRole = internal?.[0]?.role as string | undefined;
   if (
     metaInternal2 ||
-    (internal?.length && ["admin", "team_member"].includes(internal[0].role as any))
+    portalInternalRole === "admin" ||
+    portalInternalRole === "team_member"
   ) {
     const url = new URL("/admin/dashboard", req.url);
     const redirect = NextResponse.redirect(url);
@@ -159,7 +168,7 @@ export default async function middleware(req: NextRequest) {
 
   // /portal root → auto‑resolve first/default tenant
   if (isRootPortal) {
-    const meta = (user.user_metadata || {}) as any;
+    const meta = (user.user_metadata || {}) as UserMetadata;
     let resolved: string | null = meta.default_tenant_id ?? meta.default_tenant ?? null;
 
     if (!resolved) {

@@ -1,9 +1,8 @@
 'use server'
 
 import { createServiceClient } from '@/lib/supabase/server'
-import { getTenantContext } from '@/lib/supabase/auth'
+import { getAuthContext } from '@/lib/supabase/auth'
 import { assertAuth, assertRole, assertTenant } from '@/lib/guards'
-import type { Database } from '@/lib/database.types'
 
 type NewProjectInput = {
   name: string
@@ -11,8 +10,8 @@ type NewProjectInput = {
   view_mode?: 'kanban' | 'list'
 }
 
-export async function createProject(tenantId: string, input: NewProjectInput) {
-  const { member } = await getTenantContext(tenantId)
+export const createProject = async (tenantId: string, input: NewProjectInput) => {
+  const { member } = await getAuthContext(tenantId)
   assertAuth(member)
   assertTenant(member, tenantId)
   assertRole(member, ['admin', 'company_manager'])
@@ -34,8 +33,8 @@ export async function createProject(tenantId: string, input: NewProjectInput) {
   return data
 }
 
-export async function listProjects(tenantId: string) {
-  const { member } = await getTenantContext(tenantId)
+export const listProjects = async (tenantId: string) => {
+  const { member } = await getAuthContext(tenantId)
   assertAuth(member)
   assertTenant(member, tenantId)
 
@@ -48,4 +47,33 @@ export async function listProjects(tenantId: string) {
 
   if (error) throw new Error(error.message)
   return data
+}
+
+export const deleteProjectFormAction = async (formData: FormData) => {
+  const tenantId = formData.get('tenantId')
+  const projectId = formData.get('projectId')
+
+  if (typeof tenantId !== 'string' || !tenantId) {
+    throw new Error('Missing tenantId')
+  }
+
+  if (typeof projectId !== 'string' || !projectId) {
+    throw new Error('Missing projectId')
+  }
+
+  const { member } = await getAuthContext(tenantId)
+  assertAuth(member)
+  assertTenant(member, tenantId)
+  assertRole(member, ['admin', 'company_manager'])
+
+  const supabase = createServiceClient()
+  const { error } = await supabase
+    .from('projects')
+    .delete()
+    .eq('id', projectId)
+    .eq('tenant_id', member.tenant_id ?? tenantId)
+
+  if (error) {
+    throw new Error(error.message)
+  }
 }

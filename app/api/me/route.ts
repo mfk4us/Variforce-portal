@@ -33,7 +33,11 @@ export async function GET(req: Request) {
       tenantId,
       isInternal
     })
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? 'unexpected' }, { status: 500 })
+  } catch (e: unknown) {
+    const message =
+      typeof e === "object" && e !== null && "message" in e
+        ? String((e as { message: string }).message)
+        : "unexpected";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

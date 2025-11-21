@@ -1,15 +1,17 @@
-/* eslint-disable @typescript-eslint/no-use-before-define */
+
 "use client";
+// cspell:disable
 
 export const dynamic = "force-dynamic";
 
 import * as React from "react";
 const { useState, useEffect } = React;
-import { createClient } from "@supabase/supabase-js";
 import { Zap } from "lucide-react";
 
 import { Kelly_Slab } from "next/font/google";
 import { Button } from "@/components/ui/button";
+import Link from "next/link";
+import Image from "next/image";
 const variforceFont = Kelly_Slab({
   weight: "400",
   subsets: ["latin"],
@@ -17,13 +19,6 @@ const variforceFont = Kelly_Slab({
   variable: "--font-variforce",
 });
 
-function getSupabase() {
-  if (typeof window === "undefined") return null;
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !key) return null;
-  return createClient(url, key);
-}
 
 const i18n = {
   en: {
@@ -328,7 +323,20 @@ const i18n = {
     support2: "为从零起步的创始人与外包拖慢增长的中小企业而构建。",
   },
 } as const;
-const RTL = new Set(["ar","ur"]);
+
+type Lang = keyof typeof i18n;
+type Messages = (typeof i18n)["en"];
+type MessageKey = keyof Messages;
+
+const SUPPORTED_LANGS: Lang[] = Object.keys(i18n) as Lang[];
+
+function normalizeLang(raw?: string | null): Lang {
+  if (!raw) return "en";
+  const candidate = raw.toLowerCase() as Lang;
+  return SUPPORTED_LANGS.includes(candidate) ? candidate : "en";
+}
+
+const RTL = new Set<Lang>(["ar", "ur"]);
 
 type CompanyProfile = {
   companyName: string;
@@ -338,7 +346,7 @@ type CompanyProfile = {
   crNumber: string;
   vatNumber: string;
   city: string;
-  primaryLanguage: "en" | "ar" | "ur" | "hi" | "ml" | "bn" | "zh";
+  primaryLanguage: Lang;
   wantRateBook: boolean;
   acceptTerms: boolean;
 };
@@ -357,19 +365,22 @@ const initialProfile: CompanyProfile = {
 
 export default function SignupPage({ searchParams }: { searchParams: Promise<{ lang?: string }> }) {
   const sp = React.use(searchParams);
-  const initialLangFromURL = (sp?.lang as any) ?? "en";
-  const [lang, setLang] = useState<"en"|"ar"|"ur"|"hi"|"ml"|"bn"|"zh">(initialLangFromURL as any);
-  const t = (k: keyof typeof i18n["en"]) => (i18n[lang] as any)[k] ?? (i18n.en as any)[k] ?? k;
+  const initialLangFromURL = normalizeLang(sp?.lang);
+  const [lang, setLang] = useState<Lang>(initialLangFromURL);
+  const t = (k: MessageKey): string => {
+    const dict = i18n[lang] as Messages;
+    return (dict[k] ?? i18n.en[k] ?? k) as string;
+  };
   const dir = RTL.has(lang) ? "rtl" : "ltr";
-  const isRTL = RTL.has(lang);
   useEffect(() => {
     if (typeof window === "undefined") return;
     // On first mount, if URL has no lang but localStorage does, adopt it and push to URL
     const url = new URL(window.location.href);
     const urlLang = url.searchParams.get("lang");
-    const saved = window.localStorage.getItem("vf_lang");
+    const savedRaw = window.localStorage.getItem("vf_lang");
+    const saved = normalizeLang(savedRaw);
     if (!urlLang && saved && saved !== lang) {
-      setLang(saved as any);
+      setLang(saved);
       url.searchParams.set("lang", saved);
       window.history.replaceState({}, "", url.toString());
       return; // let next effect persist
@@ -395,27 +406,6 @@ export default function SignupPage({ searchParams }: { searchParams: Promise<{ l
   const [pendingOpen, setPendingOpen] = useState(false);
   const [pendingInfo, setPendingInfo] = useState<{ id?: string; reviewed_at?: string | null } | null>(null);
 
-  async function checkApplicationStatusByPhone(rawPhone: string) {
-    try {
-      const supa = getSupabase();
-      if (!supa) return null;
-      let normalized = (rawPhone || "").replace(/\D/g, "");
-      if (normalized.startsWith("05")) normalized = normalized.slice(1);
-      if (!normalized.startsWith("966")) normalized = "966" + normalized;
-      // Query most recent application for this phone
-      const { data, error } = await supa
-        .from("partners_applications")
-        .select("id,status,reviewed_at,submitted_at")
-        .eq("phone", normalized)
-        .order("submitted_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (error) return null;
-      return data as (null | { id: string; status: string; reviewed_at: string | null });
-    } catch {
-      return null;
-    }
-  }
 
   const [profile, setProfile] = useState<CompanyProfile>(initialProfile);
 
@@ -431,7 +421,6 @@ export default function SignupPage({ searchParams }: { searchParams: Promise<{ l
   const [crFieldErr, setCrFieldErr] = useState<string | null>(null);
   const [vatFieldErr, setVatFieldErr] = useState<string | null>(null);
 
-  const normalizedPhone = (phone || "").replace(/\D/g, "");
 
   // Queue a PDF file for later upload (on final submit). Actual upload happens in submitCompanyProfile().
   function queuePdf(kind: "cr" | "vat", file: File) {
@@ -485,8 +474,9 @@ export default function SignupPage({ searchParams }: { searchParams: Promise<{ l
       setMsg(t("codeSent"));
       setStep("code");
       setResendTimer(j?.resend_in ?? 60);
-    } catch (e:any) {
-      setErr(e.message || "Failed to send code");
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Failed to send code";
+      setErr(message);
     } finally {
       setLoading(false);
     }
@@ -538,13 +528,14 @@ export default function SignupPage({ searchParams }: { searchParams: Promise<{ l
           }
           // any other status → proceed to form
         }
-      } catch (e) {
+      } catch {
         // if status check fails, fall back to form
       }
       setStep("company");
       try { window.localStorage.setItem("last_phone", normalized); } catch {}
-    } catch (e:any) {
-      setErr(e.message || "Verification failed");
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Verification failed";
+      setErr(message);
     } finally {
       setLoading(false);
     }
@@ -651,8 +642,9 @@ export default function SignupPage({ searchParams }: { searchParams: Promise<{ l
       setMsg(t("submitted"));
       // Optionally navigate to an "under review" page:
       // window.location.href = "/portal/under-review";
-    } catch (e:any) {
-      setErr(e.message || "Failed to save profile");
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Failed to save profile";
+      setErr(message);
     } finally {
       setCrUploading(false);
       setVatUploading(false);
@@ -660,9 +652,6 @@ export default function SignupPage({ searchParams }: { searchParams: Promise<{ l
     }
   }
 
-  const VFWord = () => (
-    <span className={`${variforceFont.className} text-emerald-600`}>VariForce</span>
-  );
   return (
     <div className="relative min-h-screen" dir={dir} data-lang={lang} suppressHydrationWarning>
       {/* Background video */}
@@ -682,7 +671,13 @@ export default function SignupPage({ searchParams }: { searchParams: Promise<{ l
         <div className="mx-auto max-w-6xl px-4 py-3 flex items-center justify-between">
           {/* Left: brand + tagline */}
           <a href="/partners" className="inline-flex items-center gap-3 group" dir="ltr">
-            <img src="/logo.png" alt="BOCC logo" className="h-9 w-9 rounded-md bg-white ring-1 ring-emerald-200/50 shadow" />
+            <Image
+              src="/logo.png"
+              alt="BOCC logo"
+              width={36}
+              height={36}
+              className="h-9 w-9 rounded-md bg-white ring-1 ring-emerald-200/50 shadow"
+            />
             <div className="leading-tight">
               <div className="text-slate-900 font-semibold tracking-tight text-base sm:text-lg">Brightness of Creativity</div>
               <div className="text-slate-600 text-[12px]">Fast • Agile • Secure • Advanced — Modernizing your tech</div>
@@ -695,7 +690,14 @@ export default function SignupPage({ searchParams }: { searchParams: Promise<{ l
             <select
               id="lang-toggle"
               value={lang}
-              onChange={(e)=>{ const v = e.target.value as any; setLang(v); setProfile(p=>({ ...p, primaryLanguage: v })); const u = new URL(window.location.href); u.searchParams.set("lang", v); window.history.replaceState({}, "", u.toString()); }}
+              onChange={(e) => {
+                const v = normalizeLang(e.target.value);
+                setLang(v);
+                setProfile((p) => ({ ...p, primaryLanguage: v }));
+                const u = new URL(window.location.href);
+                u.searchParams.set("lang", v);
+                window.history.replaceState({}, "", u.toString());
+              }}
               className="appearance-none w-auto max-w-[52vw] sm:max-w-none truncate pl-8 pr-7 py-1.5 sm:pl-9 sm:pr-8 sm:py-2 text-xs sm:text-sm rounded-full border border-emerald-200 bg-white/70 backdrop-blur-md text-slate-900 ring-1 ring-emerald-200/40 shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
             >
               <option value="en">🇬🇧 English</option>
@@ -783,7 +785,13 @@ export default function SignupPage({ searchParams }: { searchParams: Promise<{ l
               <div className="relative mb-4">
                 {/* left icon */}
                 <span className="absolute inset-y-0 left-3 grid place-items-center">
-                  <img src="/whatsapp.svg" alt="WhatsApp" className="h-5 w-5 tint-emerald-600" />
+                  <Image
+                    src="/whatsapp.svg"
+                    alt="WhatsApp"
+                    width={20}
+                    height={20}
+                    className="h-5 w-5 tint-emerald-600"
+                  />
                 </span>
                 {/* fixed country code prefix */}
                 <span className="absolute inset-y-0 left-9 flex items-center">
@@ -827,9 +835,9 @@ export default function SignupPage({ searchParams }: { searchParams: Promise<{ l
                 <a href="/privacy" className="underline hover:text-emerald-600">{t("privacy")}</a>.
               </div>
               <p className="mt-3 text-sm text-gray-700">
-                <a href="/portal/login" className="underline hover:text-emerald-600">
+                <Link href="/portal/login" className="underline hover:text-emerald-600">
                   {t("haveAccount")}
-                </a>
+                </Link>
               </p>
             </>
           )}
@@ -860,9 +868,9 @@ export default function SignupPage({ searchParams }: { searchParams: Promise<{ l
                 <a className="text-emerald-600 hover:underline" onClick={sendOTP}>
                   {t("resend")} {resendTimer>0 ? `(${resendTimer}s)` : ""}
                 </a>
-                <a href="/portal/login" className="text-emerald-600 hover:underline">
+                <Link href="/portal/login" className="text-emerald-600 hover:underline">
                   {t("haveAccount")}
-                </a>
+                </Link>
               </div>
             </>
           )}
@@ -1030,7 +1038,14 @@ export default function SignupPage({ searchParams }: { searchParams: Promise<{ l
                   <label className="block text-sm text-gray-800 mb-1">{t("primaryLanguage")}</label>
                   <select
                     value={profile.primaryLanguage}
-                    onChange={(e)=>{ const v = e.target.value as any; setProfile(p=>({ ...p, primaryLanguage: v })); setLang(v); const u = new URL(window.location.href); u.searchParams.set("lang", v); window.history.replaceState({}, "", u.toString()); }}
+                    onChange={(e) => {
+                      const v = normalizeLang(e.target.value);
+                      setProfile((p) => ({ ...p, primaryLanguage: v }));
+                      setLang(v);
+                      const u = new URL(window.location.href);
+                      u.searchParams.set("lang", v);
+                      window.history.replaceState({}, "", u.toString());
+                    }}
                     className="w-full border rounded px-3 py-2 outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 border-emerald-200"
                   >
                     <option value="en">English</option>
@@ -1094,7 +1109,13 @@ export default function SignupPage({ searchParams }: { searchParams: Promise<{ l
             <div className="relative z-10 w-[92vw] max-w-md rounded-2xl glass-emerald shadow-glass border-glass p-5">
               <div className="flex items-start gap-3">
                 <div className="shrink-0 h-9 w-9 rounded-full bg-emerald-600/15 grid place-items-center">
-                  <img src="/whatsapp.svg" alt="WhatsApp" className="h-4 w-4 tint-emerald-600" />
+                  <Image
+                    src="/whatsapp.svg"
+                    alt="WhatsApp"
+                    width={16}
+                    height={16}
+                    className="h-4 w-4 tint-emerald-600"
+                  />
                 </div>
                 <div className="grow">
                   <h3 className="text-base font-semibold text-slate-900">Application under review</h3>
@@ -1104,9 +1125,12 @@ export default function SignupPage({ searchParams }: { searchParams: Promise<{ l
                   ) : null}
                   <div className="mt-4 flex flex-col sm:flex-row gap-2">
                     <Button onClick={() => setPendingOpen(false)} className="rounded-full">OK</Button>
-                    <a href="/portal/login" className="inline-flex items-center justify-center h-10 px-4 rounded-full border border-emerald-300 text-emerald-700 hover:bg-emerald-50">
+                    <Link
+                      href="/portal/login"
+                      className="inline-flex items-center justify-center h-10 px-4 rounded-full border border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                    >
                       Go to Login
-                    </a>
+                    </Link>
                   </div>
                 </div>
               </div>
@@ -1130,7 +1154,13 @@ export default function SignupPage({ searchParams }: { searchParams: Promise<{ l
             aria-label="X / Twitter"
             className="opacity-90 hover:opacity-100 transition-opacity"
           >
-            <img src="/x.svg" alt="X (Twitter)" className="h-4 w-4 brightness-0 invert opacity-90 hover:opacity-100 transition-opacity" />
+            <Image
+              src="/x.svg"
+              alt="X (Twitter)"
+              width={16}
+              height={16}
+              className="h-4 w-4 brightness-0 invert opacity-90 hover:opacity-100 transition-opacity"
+            />
           </a>
           <a
             href="https://instagram.com/bocc_sa"
@@ -1139,7 +1169,13 @@ export default function SignupPage({ searchParams }: { searchParams: Promise<{ l
             aria-label="Instagram"
             className="opacity-90 hover:opacity-100 transition-opacity"
           >
-            <img src="/instagram.svg" alt="Instagram" className="h-4 w-4 brightness-0 invert opacity-90 hover:opacity-100 transition-opacity" />
+            <Image
+              src="/instagram.svg"
+              alt="Instagram"
+              width={16}
+              height={16}
+              className="h-4 w-4 brightness-0 invert opacity-90 hover:opacity-100 transition-opacity"
+            />
           </a>
           <a
             href="https://linkedin.com/company/bocc-sa"
@@ -1148,7 +1184,13 @@ export default function SignupPage({ searchParams }: { searchParams: Promise<{ l
             aria-label="LinkedIn"
             className="opacity-90 hover:opacity-100 transition-opacity"
           >
-            <img src="/linkedin.svg" alt="LinkedIn" className="h-4 w-4 brightness-0 invert opacity-90 hover:opacity-100 transition-opacity" />
+            <Image
+              src="/linkedin.svg"
+              alt="LinkedIn"
+              width={16}
+              height={16}
+              className="h-4 w-4 brightness-0 invert opacity-90 hover:opacity-100 transition-opacity"
+            />
           </a>
           <a
             href="https://wa.me/966570442116"
@@ -1157,7 +1199,13 @@ export default function SignupPage({ searchParams }: { searchParams: Promise<{ l
             aria-label="WhatsApp"
             className="opacity-90 hover:opacity-100 transition-opacity"
           >
-            <img src="/whatsapp.svg" alt="WhatsApp" className="h-4 w-4 brightness-0 invert opacity-90 hover:opacity-100 transition-opacity" />
+            <Image
+              src="/whatsapp.svg"
+              alt="WhatsApp"
+              width={16}
+              height={16}
+              className="h-4 w-4 brightness-0 invert opacity-90 hover:opacity-100 transition-opacity"
+            />
           </a>
         </nav>
       </div>
